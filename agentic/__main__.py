@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from dataclasses import asdict
 from datetime import datetime
@@ -12,19 +13,16 @@ from typing import Any, Optional
 from .utils.ingest import ingest
 from .utils.report import render_dashboard
 from .orchestrator.core import Orchestrator, OrchestratorReport
-from .utils.llm import EchoJSONLLM
-from .utils.classifier import DocumentClassifier, LLMClient as ClassifierLLMProtocol
+from .utils.llm import EchoJSONLLM, OpenAIChatLLM
+from .utils.classifier import DocumentClassifier
+from .utils.llm import ClassifierOpenAILLM as ClassifierLLM
 
 
-class HeuristicClassifierLLM(ClassifierLLMProtocol):
-    """Tiny heuristic stub to satisfy DocumentClassifier's LLM dependency.
-
-    It inspects the provided prompt for a section that contains the document
-    and returns a JSON string with `label` and `reason`.
-    """
+class HeuristicClassifierLLM:
+    """Fallback heuristic classifier client when no API key is available."""
 
     def __init__(self, model: Optional[str] = None) -> None:
-        self._model = model  # kept for CLI parity; not used by heuristic
+        self._model = model
 
     def complete(
         self,
@@ -61,16 +59,41 @@ class HeuristicClassifierLLM(ClassifierLLMProtocol):
         return _json.dumps({"label": label, "reason": reason})
 
 
-def build_orchestrator(model: Optional[str], *, verbose: bool) -> Orchestrator:
-    # Analysis LLM stub (generate interface)
-    analysis_llm = EchoJSONLLM()
+def _default_models(passed_model: Optional[str]) -> tuple[str, str]:
+    """Return (analysis_model, classifier_model) based on user input.
 
-    # Classifier LLM stub (complete interface)
-    classifier_llm = HeuristicClassifierLLM(model=model)
+    - If user provides a model, use it for analysis, and try a corresponding "mini" for classifier
+      (e.g., gpt-5 -> gpt-5-mini). If it already looks like a mini model, use it for both.
+    - If user provides nothing, default to ("gpt-5", "gpt-5-mini").
+    """
+    if not passed_model:
+        return ("gpt-5", "gpt-5-mini")
+    m = passed_model.strip()
+    if m.endswith("-mini"):
+        return (m, m)
+    # naive mapping to mini variant
+    return (m, f"{m}-mini")
+
+
+def build_orchestrator(model: Optional[str], *, verbose: bool) -> Orchestrator:
+    analysis_model, classifier_model = _default_models(model)
+
+    # If OPENAI_API_KEY present, use OpenAI-backed clients; else fall back to stubs
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            analysis_llm = OpenAIChatLLM(analysis_model, temperature=0.2, max_tokens=1200)
+            classifier_llm = ClassifierLLM(classifier_model, temperature=0.0, max_tokens=512)
+        except Exception:
+            # If anything goes wrong with OpenAI client construction, fall back
+            analysis_llm = EchoJSONLLM()
+            classifier_llm = HeuristicClassifierLLM(model=classifier_model)
+    else:
+        analysis_llm = EchoJSONLLM()
+        classifier_llm = HeuristicClassifierLLM(model=classifier_model)
 
     classifier = DocumentClassifier(
         llm=classifier_llm,
-        model=model,
+        model=classifier_model,
         temperature=0.0,
     )
 
@@ -81,7 +104,9 @@ def build_orchestrator(model: Optional[str], *, verbose: bool) -> Orchestrator:
         run_parallel=True,
     )
     if verbose:
-        print("[agentic] Orchestrator initialized (parallel=True, feedback_rounds=1)")
+        print(
+            f"[agentic] Orchestrator initialized (analysis_model={analysis_model}, classifier_model={classifier_model})"
+        )
     return orch
 
 
@@ -188,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("file", type=str, help="Path to the input file")
     p_an.add_argument("--open-browser", action="store_true", help="Open the HTML report in the default browser")
     p_an.add_argument("--verbose", action="store_true", help="Verbose logging")
-    p_an.add_argument("--model", type=str, default="gpt-4o", help="Model name for classification (default: gpt-4o)")
+    p_an.add_argument("--model", type=str, default=None, help="Base model for analysis (default: gpt-5; classifier will use -mini)")
 
     # loop subcommand
     p_lp = sub.add_parser("loop", help="Iterative auto-loop analysis")
@@ -196,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lp.add_argument("--max", dest="max_iters", type=int, default=5, help="Maximum iterations (default: 5)")
     p_lp.add_argument("--open-browser", action="store_true", help="Open the final HTML report in the default browser")
     p_lp.add_argument("--verbose", action="store_true", help="Verbose logging")
-    p_lp.add_argument("--model", type=str, default="gpt-4o", help="Model name for classification (default: gpt-4o)")
+    p_lp.add_argument("--model", type=str, default=None, help="Base model for analysis (default: gpt-5; classifier will use -mini)")
 
     return p
 
