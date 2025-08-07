@@ -1,0 +1,16 @@
+# Pinned core dependencies
+openai==1.93.0
+langchain==0.3.26
+tiktoken==0.9.0
+Jinja2==3.1.6
+python-dotenv==1.1.1
+rich==14.0.0
+
+# Optional
+pydantic==2.11.7
+pytest==8.4.1
+beautifulsoup4==4.13.4
+pre-commit==3.8.0
+ruff==0.6.9
+black==24.4.2
+mypy==1.11.2

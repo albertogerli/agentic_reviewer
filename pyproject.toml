@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project"
+version = "0.1.0"
+description = "Project with LangChain, OpenAI, and related tooling"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  {name = "Your Name"}
+]
+keywords = ["openai", "langchain", "tiktoken", "jinja2", "dotenv", "rich"]
+
+# Core and optional dependencies
+# Keeping versions unpinned here for simplicity; pin in requirements.txt if desired
+dependencies = [
+  "openai",
+  "langchain",
+  "tiktoken",
+  "jinja2",
+  "python-dotenv",
+  "rich",
+  # Optional
+  "pydantic",
+  "pytest",
+  "beautifulsoup4",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+

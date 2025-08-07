@@ -1,0 +1,6 @@
+Invoice #10293
+Bill To: ACME Inc.
+Items:
+- Consulting Services (10 hours) $2000
+Total Due: $2000
+Payment Terms: Net 30
