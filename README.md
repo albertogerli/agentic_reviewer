@@ -1,6 +1,6 @@
-# Project
+# Agentic
 
-A Python project integrating LangChain, OpenAI, and related tooling. This repository includes modular components for building agentic workflows.
+Agentic document analysis system with an orchestrator that coordinates specialist agents. Includes ingestion utilities, document classification, agent registry, orchestrator with peer feedback, and a CLI with HTML report rendering.
 
 - Status: alpha (0.1.0)
 - Python: >= 3.10
@@ -10,39 +10,48 @@ A Python project integrating LangChain, OpenAI, and related tooling. This reposi
 - Editable install for local development:
   - pip install -e .
 
-- Optional: install dev tools
+- Optional tools:
   - pip install -r requirements.txt
 
-## Quick start
+- Environment variables (optional for real LLMs):
+  - export OPENAI_API_KEY={{OPENAI_API_KEY}}
 
-- Environment
-  - Copy .env.example to .env and provide required variables (e.g., OpenAI credentials if applicable)
+## CLI Usage
 
-- Run tests
-  - pytest -q
+After installing (-e recommended), the command `agentic` is available.
 
-- Examples
-  - See examples/ for runnable notebooks or scripts
+- One-shot analysis:
+  - agentic analyze path/to/file --open-browser --verbose
 
-## Usage
+- Iterative loop (default 5 iterations):
+  - agentic loop path/to/file --max 5 --open-browser --verbose
 
-Below is a high-level example outline. Adapt to the concrete classes/functions in this repository.
+### Model selection
+- If you do NOT pass --model:
+  - Analysis uses "gpt-5"
+  - Classifier uses "gpt-5-mini"
+- If you pass --model foo:
+  - Analysis uses "foo"
+  - Classifier uses "foo-mini" (if foo already ends with -mini, uses foo for both)
+- If OPENAI_API_KEY is not set or the OpenAI client fails to initialize, the system falls back to local stubs (no API calls).
 
-- Import your core modules
-  - from agentic import ...
-  - from agentic.orchestrator import ...
-  - from agentic.agents import ...
+Examples:
+- OPENAI_API_KEY={{OPENAI_API_KEY}} agentic analyze examples/contract.txt --verbose
+- OPENAI_API_KEY={{OPENAI_API_KEY}} agentic analyze examples/contract.txt --model gpt-4o
+- OPENAI_API_KEY={{OPENAI_API_KEY}} agentic analyze examples/contract.txt --model gpt-5-mini
 
-- Minimal pattern (pseudo-code)
-  - orchestrator = Orchestrator(...)
-  - result = orchestrator.run(input={...})
-  - print(result)
+## Python API (outline)
 
-See examples/ and tests/ for concrete usages.
+- from agentic.orchestrator import Orchestrator
+- from agentic.utils.classifier import DocumentClassifier
+- from agentic.utils.ingest import ingest
+
+Example outline:
+- doc = ingest(path="examples/contract.txt")
+- orch = Orchestrator(...)
+- report = await orch.analyze(doc.text)
 
 ## Architecture
-
-This project follows a modular layout to enable composability and testing. A conceptual view:
 
 ```mermaid
 flowchart TD
@@ -57,34 +66,23 @@ flowchart TD
   end
 
   subgraph Integrations
-    LC[LangChain]
     OAI[OpenAI]
-    TOK[Tiktoken]
   end
 
   U -->|requests| O
   O -->|delegates| A1
   A1 -->|helpers| UTI
-
-  O --> LC
   O --> OAI
-  O --> TOK
 ```
 
-- Orchestrator: central coordinator for workflows
-- Agents: specialized workers that perform tasks (retrieval, reasoning, formatting)
-- Utils: shared utilities for logging, parsing, prompting, etc.
-- Integrations: external libraries and APIs
+- Orchestrator: central coordinator for workflows (classification → agents → feedback → synthesis)
+- Agents: specialized workers per document type
+- Utils: ingestion, classification, LLM adapters, HTML report rendering
 
 ## Development
 
 - Code style
-  - Ruff and Black configured via pyproject.toml
-  - Line length: 100
-
-- Pre-commit
-  - Optionally enable hooks defined in .pre-commit-config.yaml
-  - pre-commit install
+  - Ruff and Black via pyproject.toml (line length 100)
 
 - Testing
   - pytest -q
@@ -97,15 +95,9 @@ flowchart TD
 - Editable install (recommended for local dev)
   - pip install -e .
 
-- Private PyPI (optional)
-  - Build: python -m build
-  - Upload: twine upload --repository-url https://your.private.pypi/simple dist/*
-  - Configure credentials via environment variables or keyring; avoid hardcoding secrets.
-
 ## Versioning and Releases
 
-- This repository uses semantic versioning
-- Current version is defined in pyproject.toml (project.version)
+- Semantic versioning; current version in pyproject.toml
 - Tagging a release
   - git tag -a v0.1.0 -m "Release v0.1.0"
   - git push origin v0.1.0
@@ -115,18 +107,14 @@ See CHANGELOG.md for release notes.
 ## Contributing
 
 - Branching
-  - Create a feature branch from main: git checkout -b feat/short-description
+  - git checkout -b feat/short-description
 
 - Commit conventions
-  - Use conventional commits when possible (feat:, fix:, docs:, refactor:, test:, chore:)
+  - Conventional commits when possible (feat:, fix:, docs:, refactor:, test:, chore:)
 
 - Pull requests
-  - Include tests for new behavior
-  - Update documentation where applicable
+  - Include tests; update documentation
   - Ensure lint and tests pass locally
-
-- Code review
-  - Keep PRs focused and small where possible
 
 ## License
 
