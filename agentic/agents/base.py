@@ -33,9 +33,18 @@ class Agent(ABC):
 
     Subclasses should implement `analyze` to process an input document and
     return an AgentReport.
+
+    Agents may optionally declare model tier hints to guide the orchestrator's
+    per-agent LLM selection:
+      - min_tier: lowest acceptable tier among {"gpt-5-nano", "gpt-5-mini", "gpt-5"}
+      - preferred_tier: desired tier among the same set
+    The orchestrator will respect these hints while still applying any global cap.
     """
 
     name: str = "Agent"
+    # Optional tier hints
+    min_tier: str | None = None
+    preferred_tier: str | None = None
 
     @abstractmethod
     def analyze(self, document: Any) -> AgentReport:

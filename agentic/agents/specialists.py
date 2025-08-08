@@ -12,6 +12,9 @@ from ..utils.llm import LLMClient
 @dataclass
 class LegalComplianceAgent(Agent):
     name: str = "LegalComplianceAgent"
+    # Hints: complex legal reasoning benefits from higher tier
+    min_tier: str | None = "gpt-5-mini"
+    preferred_tier: str | None = "gpt-5"
     llm: LLMClient | None = None
 
     def analyze(self, document: Any) -> AgentReport:
@@ -44,6 +47,8 @@ class LegalComplianceAgent(Agent):
 @dataclass
 class ClauseExtractorAgent(Agent):
     name: str = "ClauseExtractorAgent"
+    min_tier: str | None = "gpt-5-mini"
+    preferred_tier: str | None = None
     llm: LLMClient | None = None
 
     def analyze(self, document: Any) -> AgentReport:
@@ -82,6 +87,8 @@ register_agent("contract", ClauseExtractorAgent)
 @dataclass
 class CitationCheckAgent(Agent):
     name: str = "CitationCheckAgent"
+    min_tier: str | None = "gpt-5-mini"
+    preferred_tier: str | None = None
     llm: LLMClient | None = None
 
     def analyze(self, document: Any) -> AgentReport:
@@ -112,6 +119,8 @@ class CitationCheckAgent(Agent):
 @dataclass
 class MethodologyAgent(Agent):
     name: str = "MethodologyAgent"
+    min_tier: str | None = "gpt-5-mini"
+    preferred_tier: str | None = "gpt-5"
     llm: LLMClient | None = None
 
     def analyze(self, document: Any) -> AgentReport:
@@ -150,6 +159,8 @@ register_agent("research_paper", MethodologyAgent)
 @dataclass
 class TotalsValidatorAgent(Agent):
     name: str = "TotalsValidatorAgent"
+    min_tier: str | None = "gpt-5-nano"
+    preferred_tier: str | None = "gpt-5-nano"
     llm: LLMClient | None = None
 
     def analyze(self, document: Any) -> AgentReport:

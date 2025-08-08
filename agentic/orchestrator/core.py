@@ -70,8 +70,12 @@ class Orchestrator:
         agents: List[Agent] = []
         for cls in agent_classes:
             agent_name = getattr(cls, "name", cls.__name__)
-            tier = self._select_tier(agent_name, complexity)
-            tier = self._apply_cap(tier)
+            base_tier = self._select_tier(agent_name, complexity)
+            # Respect agent hints
+            min_hint = getattr(cls, "min_tier", None)
+            pref_hint = getattr(cls, "preferred_tier", None)
+            hinted = self._respect_hints(base_tier, min_hint, pref_hint)
+            tier = self._apply_cap(hinted)
             tiers[agent_name] = tier
             llm = self._llm_factory(tier)
             agents.append(self._instantiate_agent(cls, llm))
@@ -250,10 +254,21 @@ class Orchestrator:
             return "gpt-5-mini"
         return "gpt-5-nano"
 
-    def _apply_cap(self, tier: str) -> str:
+    def _apply_cap(self, tier: str) - str:
         cap = (self._model_cap or "").strip()
         order = {"gpt-5-nano": 0, "gpt-5-mini": 1, "gpt-5": 2}
         if not cap or cap not in order:
             return tier
-        return tier if order[tier] <= order[cap] else cap
+        return tier if order[tier] = order[cap] else cap
+
+    def _respect_hints(self, base_tier: str, min_tier: Optional[str], preferred_tier: Optional[str]) - str:
+        order = {"gpt-5-nano": 0, "gpt-5-mini": 1, "gpt-5": 2}
+        tier = base_tier if base_tier in order else "gpt-5-mini"
+        # Apply minimum hint
+        if min_tier in order and order[tier] < order[min_tier]:
+            tier = min_tier  # upgrade to min
+        # Apply preferred if higher than current
+        if preferred_tier in order and order[tier] < order[preferred_tier]:
+            tier = preferred_tier
+        return tier
 
