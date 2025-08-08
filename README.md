@@ -26,14 +26,32 @@ After installing (-e recommended), the command `agentic` is available.
 - Iterative loop (default 5 iterations):
   - agentic loop path/to/file --max 5 --open-browser --verbose
 
-### Model selection
-- If you do NOT pass --model:
-  - Analysis uses "gpt-5"
-  - Classifier uses "gpt-5-mini"
-- If you pass --model foo:
-  - Analysis uses "foo"
-  - Classifier uses "foo-mini" (if foo already ends with -mini, uses foo for both)
-- If OPENAI_API_KEY is not set or the OpenAI client fails to initialize, the system falls back to local stubs (no API calls).
+### Model selection and tiering
+- Tier set: { gpt-5 (max), gpt-5-mini, gpt-5-nano (min) }
+- If you do NOT pass --model (no cap):
+  - Ogni agente riceve un tier assegnato dinamicamente dall’orchestrator in base alla complessità del documento e agli "agent-hints" (vedi sotto).
+  - Il classificatore usa per default gpt-5-mini (o gpt-5-nano se necessario).
+- Se passi --model come cap globale (uno tra gpt-5, gpt-5-mini, gpt-5-nano):
+  - Nessun agente potrà superare quel tier (es. cap=gpt-5-mini declassa gpt-5 → gpt-5-mini).
+- Se OPENAI_API_KEY non è impostata o il client non si inizializza, il sistema usa stub locali (nessuna chiamata API).
+
+#### Agent tier hints
+Gli agenti possono dichiarare suggerimenti a livello di classe per influenzare il tier minimo/preferito:
+
+- Inherit da agentic.agents.base.Agent e opzionalmente impostare:
+  - min_tier: il tier minimo accettabile (gpt-5-nano | gpt-5-mini | gpt-5)
+  - preferred_tier: il tier preferito (stessa scelta)
+
+Esempio:
+
+- class LegalComplianceAgent(Agent):
+    min_tier = "gpt-5-mini"
+    preferred_tier = "gpt-5"
+
+L’orchestrator segue l’ordine di decisione:
+1) Calcola una score di complessità [0,1] su euristiche (lunghezza, cifre, marker di sezione, ricchezza vocabolario) e propone un base_tier.
+2) Applica i hints dell’agente per portare il tier almeno a min_tier e, se possibile, fino al preferred_tier.
+3) Applica il cap globale se fornito via --model.
 
 Examples:
 - OPENAI_API_KEY={{OPENAI_API_KEY}} agentic analyze examples/contract.txt --verbose
