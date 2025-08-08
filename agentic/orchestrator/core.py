@@ -254,14 +254,14 @@ class Orchestrator:
             return "gpt-5-mini"
         return "gpt-5-nano"
 
-    def _apply_cap(self, tier: str) - str:
+    def _apply_cap(self, tier: str) -> str:
         cap = (self._model_cap or "").strip()
         order = {"gpt-5-nano": 0, "gpt-5-mini": 1, "gpt-5": 2}
         if not cap or cap not in order:
             return tier
-        return tier if order[tier] = order[cap] else cap
+        return tier if order[tier] <= order[cap] else cap
 
-    def _respect_hints(self, base_tier: str, min_tier: Optional[str], preferred_tier: Optional[str]) - str:
+    def _respect_hints(self, base_tier: str, min_tier: Optional[str], preferred_tier: Optional[str]) -> str:
         order = {"gpt-5-nano": 0, "gpt-5-mini": 1, "gpt-5": 2}
         tier = base_tier if base_tier in order else "gpt-5-mini"
         # Apply minimum hint
