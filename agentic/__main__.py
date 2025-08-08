@@ -133,6 +133,16 @@ async def run_once(file_path: str, *, model: Optional[str], open_browser: bool, 
         print("[agentic] Running analysis…")
     report = await orch.analyze(doc.text)
 
+    # Show tiers if requested
+    if open_browser or verbose or True:
+        pass  # placeholder to keep structure
+    if getattr(args, "show_tiers", False):
+        tiers = (report.metadata or {}).get("per_agent_models", {})
+        if tiers:
+            print("[agentic] Per-agent tiers:")
+            for name, tier in tiers.items():
+                print(f"  - {name}: {tier}")
+
     if verbose:
         print("[agentic] Rendering dashboard…")
     out_path = render_dashboard(report, document=doc, open_in_browser=open_browser)
@@ -179,6 +189,14 @@ async def run_loop(
             print(f"[agentic] Loop iteration {i}/{max_iters}…")
         report = await orch.analyze(base_text if i == 1 else base_text + "\n\n(Iterative context applied)")
 
+        # Show tiers per iteration if requested
+        if getattr(args, "show_tiers", False):
+            tiers = (report.metadata or {}).get("per_agent_models", {})
+            if tiers:
+                print("[agentic] Per-agent tiers:")
+                for name, tier in tiers.items():
+                    print(f"  - {name}: {tier}")
+
         # Persist artifacts per iteration
         iter_payload: dict[str, Any] = {
             "iteration": i,
@@ -223,6 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("file", type=str, help="Path to the input file")
     p_an.add_argument("--open-browser", action="store_true", help="Open the HTML report in the default browser")
     p_an.add_argument("--verbose", action="store_true", help="Verbose logging")
+    p_an.add_argument("--show-tiers", action="store_true", help="Print per-agent model tiers selected by the orchestrator")
     p_an.add_argument("--model", type=str, default=None, help="Model cap across agents: one of gpt-5, gpt-5-mini, gpt-5-nano (default: no cap)")
 
     # loop subcommand
@@ -231,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lp.add_argument("--max", dest="max_iters", type=int, default=5, help="Maximum iterations (default: 5)")
     p_lp.add_argument("--open-browser", action="store_true", help="Open the final HTML report in the default browser")
     p_lp.add_argument("--verbose", action="store_true", help="Verbose logging")
+    p_lp.add_argument("--show-tiers", action="store_true", help="Print per-agent model tiers selected each iteration")
     p_lp.add_argument("--model", type=str, default=None, help="Model cap across agents: one of gpt-5, gpt-5-mini, gpt-5-nano (default: no cap)")
 
     return p
