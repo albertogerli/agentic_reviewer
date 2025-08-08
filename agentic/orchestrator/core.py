@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import asyncio
 
 from ..agents import Agent, AgentReport, get_registered_agents
 from ..utils.classifier import ClassificationResult, DocumentClassifier
-from ..utils.llm import LLMClient as AnalysisLLMClient
+from ..utils.llm import LLMClient
 
 
 @dataclass(slots=True)
@@ -35,8 +35,8 @@ class Orchestrator:
 
     Flow:
       1) Classify document to pick relevant agents.
-      2) Run agents in parallel or sequentially.
-      3) Aggregate their reports.
+      2) Assign an LLM tier per agent (gpt-5 / gpt-5-mini / gpt-5-nano) dynamically.
+      3) Run agents in parallel or sequentially.
       4) Share peer summaries and allow a single feedback rerun (configurable).
       5) Produce an OrchestratorReport with synthesis and global confidence.
     """
@@ -44,15 +44,17 @@ class Orchestrator:
     def __init__(
         self,
         classifier: DocumentClassifier,
-        analysis_llm: Optional[AnalysisLLMClient] = None,
         *,
+        llm_factory: Callable[[str], LLMClient],
         max_feedback_rounds: int = 1,
         run_parallel: bool = True,
+        model_cap: Optional[str] = None,
     ) -> None:
         self._classifier = classifier
-        self._llm = analysis_llm
+        self._llm_factory = llm_factory
         self._max_feedback_rounds = max(0, int(max_feedback_rounds))
         self._run_parallel = bool(run_parallel)
+        self._model_cap = (model_cap or "").strip() or None
 
     # -------------------------- Public API --------------------------
     async def analyze(self, document: Any) -> OrchestratorReport:
@@ -62,10 +64,22 @@ class Orchestrator:
         doc_key = self._normalize_label_to_key(classification.label)
 
         agent_classes = get_registered_agents(doc_key)
-        agents = [self._instantiate_agent(cls) for cls in agent_classes]
+        # Decide tiers and instantiate agents with per-agent LLMs
+        complexity = self._assess_complexity(text)
+        tiers: Dict[str, str] = {}
+        agents: List[Agent] = []
+        for cls in agent_classes:
+            agent_name = getattr(cls, "name", cls.__name__)
+            tier = self._select_tier(agent_name, complexity)
+            tier = self._apply_cap(tier)
+            tiers[agent_name] = tier
+            llm = self._llm_factory(tier)
+            agents.append(self._instantiate_agent(cls, llm))
 
         # 1) Initial round
         initial_reports = await self._run_agents(agents, document)
+        # Track chosen tiers in metadata
+        per_agent_models = tiers.copy()
 
         # 2) Optionally perform feedback rounds (at most one round as per spec, but parameterized)
         final_reports = initial_reports
@@ -91,21 +105,22 @@ class Orchestrator:
                 "run_parallel": self._run_parallel,
                 "max_feedback_rounds": self._max_feedback_rounds,
                 "num_agents": len(agents),
+                "per_agent_models": per_agent_models,
             },
         )
 
     # -------------------------- Internals --------------------------
-    def _instantiate_agent(self, cls: type[Agent]) -> Agent:
+    def _instantiate_agent(self, cls: type[Agent], llm: Optional[LLMClient]) -> Agent:
         # Try best-effort to pass llm in constructor, else set attribute if present
         try:
-            if self._llm is not None:
-                return cls(llm=self._llm)  # type: ignore[call-arg]
+            if llm is not None:
+                return cls(llm=llm)  # type: ignore[call-arg]
         except TypeError:
             pass
         agent = cls()  # type: ignore[call-arg]
-        if self._llm is not None and hasattr(agent, "llm"):
+        if llm is not None and hasattr(agent, "llm"):
             try:
-                setattr(agent, "llm", self._llm)
+                setattr(agent, "llm", llm)
             except Exception:
                 pass
         return agent
@@ -203,4 +218,42 @@ class Orchestrator:
             "generic": "generic",
         }
         return mapping.get(l, l.replace(" ", "_"))
+
+    # ---------------- Tiering logic ----------------
+    def _assess_complexity(self, text: str) -> float:
+        """Return a complexity score in [0,1] using lightweight heuristics.
+        Factors: length, numeric density, section markers, unique tokens.
+        """
+        import math
+        t = text or ""
+        n = len(t)
+        # length factor (up to 20k chars)
+        f_len = min(1.0, n / 20000.0)
+        # digit density
+        digits = sum(ch.isdigit() for ch in t)
+        f_num = min(1.0, digits / max(1, n) * 50)  # scale
+        # section markers (indicate structure)
+        markers = ["abstract", "method", "results", "conclusion", "terms", "clause", "invoice", "total"]
+        f_sections = min(1.0, sum(1 for m in markers if m in t.lower()) / 6.0)
+        # crude vocabulary richness
+        words = [w for w in t.lower().split() if w.isalpha()]
+        uniq = len(set(words))
+        f_vocab = min(1.0, (uniq / max(1, len(words))) * 5.0)
+        score = max(0.0, min(1.0, 0.45 * f_len + 0.2 * f_num + 0.2 * f_sections + 0.15 * f_vocab))
+        return score
+
+    def _select_tier(self, agent_name: str, complexity: float) -> str:
+        """Map complexity to a tier. Simple thresholds; can be extended or learned."""
+        if complexity >= 0.66:
+            return "gpt-5"
+        if complexity >= 0.33:
+            return "gpt-5-mini"
+        return "gpt-5-nano"
+
+    def _apply_cap(self, tier: str) -> str:
+        cap = (self._model_cap or "").strip()
+        order = {"gpt-5-nano": 0, "gpt-5-mini": 1, "gpt-5": 2}
+        if not cap or cap not in order:
+            return tier
+        return tier if order[tier] <= order[cap] else cap
 

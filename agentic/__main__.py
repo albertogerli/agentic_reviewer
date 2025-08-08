@@ -75,20 +75,19 @@ def _default_models(passed_model: Optional[str]) -> tuple[str, str]:
     return (m, f"{m}-mini")
 
 
-def build_orchestrator(model: Optional[str], *, verbose: bool) -> Orchestrator:
-    analysis_model, classifier_model = _default_models(model)
+def build_orchestrator(model_cap: Optional[str], *, verbose: bool) -> Orchestrator:
+    # Classifier model choice: prefer mini, but respect cap if it's the smallest
+    classifier_model = "gpt-5-mini"
+    if model_cap and model_cap.strip() == "gpt-5-nano":
+        classifier_model = "gpt-5-nano"
 
-    # If OPENAI_API_KEY present, use OpenAI-backed clients; else fall back to stubs
+    # Build classifier LLM (OpenAI if available, else heuristic)
     if os.getenv("OPENAI_API_KEY"):
         try:
-            analysis_llm = OpenAIChatLLM(analysis_model, temperature=0.2, max_tokens=1200)
             classifier_llm = ClassifierLLM(classifier_model, temperature=0.0, max_tokens=512)
         except Exception:
-            # If anything goes wrong with OpenAI client construction, fall back
-            analysis_llm = EchoJSONLLM()
             classifier_llm = HeuristicClassifierLLM(model=classifier_model)
     else:
-        analysis_llm = EchoJSONLLM()
         classifier_llm = HeuristicClassifierLLM(model=classifier_model)
 
     classifier = DocumentClassifier(
@@ -97,15 +96,26 @@ def build_orchestrator(model: Optional[str], *, verbose: bool) -> Orchestrator:
         temperature=0.0,
     )
 
+    # LLM factory: returns a per-agent client for the requested tier, with optional cap applied inside orchestrator
+    def llm_factory(tier: str):
+        # If OpenAI key available, create a chat client on the requested model; else fallback stub
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                return OpenAIChatLLM(tier, temperature=0.2, max_tokens=1200)
+            except Exception:
+                return EchoJSONLLM()
+        return EchoJSONLLM()
+
     orch = Orchestrator(
         classifier=classifier,
-        analysis_llm=analysis_llm,
+        llm_factory=llm_factory,
         max_feedback_rounds=1,
         run_parallel=True,
+        model_cap=model_cap,
     )
     if verbose:
         print(
-            f"[agentic] Orchestrator initialized (analysis_model={analysis_model}, classifier_model={classifier_model})"
+            f"[agentic] Orchestrator initialized (classifier_model={classifier_model}, cap={model_cap or 'none'})"
         )
     return orch
 
@@ -213,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("file", type=str, help="Path to the input file")
     p_an.add_argument("--open-browser", action="store_true", help="Open the HTML report in the default browser")
     p_an.add_argument("--verbose", action="store_true", help="Verbose logging")
-    p_an.add_argument("--model", type=str, default=None, help="Base model for analysis (default: gpt-5; classifier will use -mini)")
+    p_an.add_argument("--model", type=str, default=None, help="Model cap across agents: one of gpt-5, gpt-5-mini, gpt-5-nano (default: no cap)")
 
     # loop subcommand
     p_lp = sub.add_parser("loop", help="Iterative auto-loop analysis")
@@ -221,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lp.add_argument("--max", dest="max_iters", type=int, default=5, help="Maximum iterations (default: 5)")
     p_lp.add_argument("--open-browser", action="store_true", help="Open the final HTML report in the default browser")
     p_lp.add_argument("--verbose", action="store_true", help="Verbose logging")
-    p_lp.add_argument("--model", type=str, default=None, help="Base model for analysis (default: gpt-5; classifier will use -mini)")
+    p_lp.add_argument("--model", type=str, default=None, help="Model cap across agents: one of gpt-5, gpt-5-mini, gpt-5-nano (default: no cap)")
 
     return p
 
