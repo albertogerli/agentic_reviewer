@@ -1,0 +1,11 @@
+# Academic Search Requirements
+# 
+# For Semantic Scholar API integration
+
+# Core dependency (already in base requirements)
+requests>=2.31.0
+
+# Optional: for higher rate limits
+# Get free API key at: https://www.semanticscholar.org/product/api
+# export SEMANTIC_SCHOLAR_API_KEY="your_key_here"
+

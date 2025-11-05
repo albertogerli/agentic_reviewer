@@ -1,0 +1,101 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+myenv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific - exclude other programs
+main.py
+Agenti*.py
+DOI.py
+PTE*.py
+CME*.py
+
+# Output directories
+output_*/
+reviews/
+.gradio/
+
+# Databases and logs
+*.db
+*.log
+*.db-journal
+
+# Configuration files with secrets (keep only example)
+config.yaml
+.env
+
+# Documents and media
+*.pdf
+*.docx
+*.doc
+*.xlsx
+*.xls
+*.pptx
+*.ppt
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mov
+*.mp4
+*.mp3
+*.m4a
+*.zip
+*.tar.gz
+
+# Test outputs
+test_output/
+tmp/
+temp/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Data files
+*.csv
+*.json
+*.RData
+*.rds
+
+# Backup files
+*~
+*.bak
+*.backup
+~$*
+

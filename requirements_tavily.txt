@@ -1,0 +1,17 @@
+# Tavily Web Search (Fallback per OpenAI Responses API)
+# 
+# Installazione:
+#   pip install -r requirements_tavily.txt
+#
+# Setup:
+#   1. Registrati su https://tavily.com (FREE: 1000 ricerche/mese)
+#   2. Ottieni API key (tvly-...)
+#   3. export TAVILY_API_KEY="tvly-YOUR-KEY"
+#
+# Benefici:
+#   - Fallback automatico se OpenAI Responses API va in timeout
+#   - Web search più stabile e affidabile
+#   - FREE tier generoso (1000 ricerche/mese)
+
+tavily-python>=0.3.0
+
