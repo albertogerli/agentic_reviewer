@@ -54,6 +54,15 @@ class SafePythonExecutor:
         'reversed': reversed,
         'any': any,
         'all': all,
+        'pow': pow,
+        'divmod': divmod,
+        'chr': chr,  # Convert int to character
+        'ord': ord,  # Convert character to int
+        'isinstance': isinstance,  # Type checking
+        'type': type,  # Get type
+        'map': map,  # Map function
+        'filter': filter,  # Filter function
+        'print': print,  # Debug output
     }
     
     # Safe modules/functions
@@ -163,6 +172,26 @@ class SafePythonExecutor:
                 success=True,
                 output=output,
                 error=None,
+                execution_time=execution_time
+            )
+            
+        except NameError as e:
+            execution_time = time.time() - start_time
+            # Extract the undefined variable name
+            var_name = str(e).split("'")[1] if "'" in str(e) else "unknown"
+            error_msg = f"NameError: Variable '{var_name}' is not defined.\n\n"
+            error_msg += "💡 SOLUTION: You must extract and define '{var_name}' from the document text first.\n"
+            error_msg += "Example:\n"
+            error_msg += f"# Extract {var_name} from document\n"
+            error_msg += f"import re\n"
+            error_msg += f"{var_name} = []  # or parse from text\n"
+            error_msg += f"# Then use {var_name} in calculations\n"
+            logger.error(f"Code execution failed: NameError: {var_name} not defined")
+            
+            return ToolResult(
+                success=False,
+                output=None,
+                error=error_msg,
                 execution_time=execution_time
             )
             
@@ -627,8 +656,21 @@ Please rewrite your code using direct calculations, variables, and basic math op
                 "content": content
             })
     
-    # Max iterations reached, return last response
-    logger.warning(f"Max tool iterations ({max_tool_iterations}) reached")
+    # Max iterations reached - get final summary anyway
+    logger.warning(f"⚠️ Max tool iterations ({max_tool_iterations}) reached - Data Validator couldn't complete all calculations")
+    logger.info(f"💡 Requesting summary of completed analysis...")
+    
+    # Ask for summary of what was completed
+    current_messages.append({
+        "role": "user",
+        "content": """Max iterations reached. Please provide a summary of your analysis based on what you were able to validate. 
+        Include:
+        1. What calculations/data you successfully verified
+        2. What issues you encountered
+        3. Any recommendations despite incomplete validation
+        
+        Be concise and practical."""
+    })
     
     # Get final response
     response = client.chat.completions.create(

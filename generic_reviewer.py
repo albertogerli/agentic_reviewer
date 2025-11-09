@@ -28,6 +28,169 @@ from main import (
 )
 from openai import AsyncOpenAI
 
+# ============================================================================
+# STRUCTURED ISSUE FORMAT (for Evidence-First UI)
+# ============================================================================
+
+ISSUE_FORMAT_INSTRUCTION = """
+IMPORTANT: For each issue you identify, provide it in this EXACT format:
+
+[ISSUE:SEVERITY:CONFIDENCE]
+Title: <brief title>
+Category: <compliance|legal|technical|content|style|other>
+Description: <detailed description>
+Location: <where in document>
+Evidence: <specific text or data>
+Suggestion: <how to fix>
+[/ISSUE]
+
+Where:
+- SEVERITY: critical|high|medium|low
+- CONFIDENCE: 0-100 (how certain you are)
+- Category helps with risk heatmap visualization
+
+If you want to propose a SPECIFIC TEXT CHANGE (not just a suggestion), add:
+
+[CHANGE:ISSUE_TITLE]
+Type: delete|insert|replace
+Location: <paragraph/section identifier>
+Old: <exact original text to change (for delete/replace)>
+New: <new text to insert (for insert/replace)>
+Reason: <brief explanation>
+[/CHANGE]
+
+Example with issue and change:
+[ISSUE:high:85]
+Title: Missing regulatory compliance statement
+Category: compliance
+Description: The document lacks required FDA approval statement
+Location: Executive Summary, page 1
+Evidence: No mention of FDA clearance
+Suggestion: Add FDA 510(k) certification statement
+[/ISSUE]
+
+[CHANGE:Missing regulatory compliance statement]
+Type: insert
+Location: Executive Summary, end of first paragraph
+Old: 
+New: This device has received FDA 510(k) clearance (K123456) and CE marking for the European market.
+Reason: Regulatory compliance requirement for medical device marketing
+[/CHANGE]
+"""
+
+def parse_structured_issues(review_text: str, agent_name: str) -> List[Dict[str, Any]]:
+    """Parse structured issues from agent review text."""
+    import re
+    
+    issues = []
+    pattern = r'\[ISSUE:(\w+):(\d+)\](.*?)\[/ISSUE\]'
+    
+    matches = re.finditer(pattern, review_text, re.DOTALL | re.IGNORECASE)
+    
+    for match in matches:
+        severity = match.group(1).lower()
+        confidence = int(match.group(2))
+        content = match.group(3).strip()
+        
+        # Parse fields
+        issue = {
+            'agent': agent_name,
+            'severity': severity,
+            'confidence': confidence,
+            'title': '',
+            'category': 'other',
+            'description': '',
+            'location': '',
+            'evidence': '',
+            'suggestion': ''
+        }
+        
+        # Extract fields with regex
+        for line in content.split('\n'):
+            line = line.strip()
+            if line.startswith('Title:'):
+                issue['title'] = line.replace('Title:', '').strip()
+            elif line.startswith('Category:'):
+                issue['category'] = line.replace('Category:', '').strip().lower()
+            elif line.startswith('Description:'):
+                issue['description'] = line.replace('Description:', '').strip()
+            elif line.startswith('Location:'):
+                issue['location'] = line.replace('Location:', '').strip()
+            elif line.startswith('Evidence:'):
+                issue['evidence'] = line.replace('Evidence:', '').strip()
+            elif line.startswith('Suggestion:'):
+                issue['suggestion'] = line.replace('Suggestion:', '').strip()
+        
+        if issue['title']:  # Only add if we have at least a title
+            issues.append(issue)
+    
+    return issues
+
+
+def parse_proposed_changes(review_text: str, agent_name: str) -> List[Dict[str, Any]]:
+    """Parse proposed text changes from agent review text."""
+    import re
+    
+    changes = []
+    pattern = r'\[CHANGE:(.*?)\](.*?)\[/CHANGE\]'
+    
+    matches = re.finditer(pattern, review_text, re.DOTALL | re.IGNORECASE)
+    
+    for idx, match in enumerate(matches):
+        issue_title = match.group(1).strip()
+        content = match.group(2).strip()
+        
+        # Parse fields
+        change = {
+            'id': f"{agent_name}_{idx}",
+            'agent': agent_name,
+            'issue_title': issue_title,
+            'type': 'replace',  # default
+            'location': '',
+            'old_text': '',
+            'new_text': '',
+            'reason': '',
+            'status': 'pending'  # pending|accepted|rejected
+        }
+        
+        # Extract fields
+        current_field = None
+        field_content = []
+        
+        for line in content.split('\n'):
+            line_stripped = line.strip()
+            
+            if line_stripped.startswith('Type:'):
+                change['type'] = line_stripped.replace('Type:', '').strip().lower()
+            elif line_stripped.startswith('Location:'):
+                change['location'] = line_stripped.replace('Location:', '').strip()
+            elif line_stripped.startswith('Old:'):
+                current_field = 'old'
+                field_content = [line_stripped.replace('Old:', '').strip()]
+            elif line_stripped.startswith('New:'):
+                if current_field == 'old':
+                    change['old_text'] = '\n'.join(field_content).strip()
+                current_field = 'new'
+                field_content = [line_stripped.replace('New:', '').strip()]
+            elif line_stripped.startswith('Reason:'):
+                if current_field == 'new':
+                    change['new_text'] = '\n'.join(field_content).strip()
+                current_field = 'reason'
+                field_content = [line_stripped.replace('Reason:', '').strip()]
+            elif current_field and line_stripped:
+                field_content.append(line_stripped)
+        
+        # Save last field
+        if current_field == 'new':
+            change['new_text'] = '\n'.join(field_content).strip()
+        elif current_field == 'reason':
+            change['reason'] = '\n'.join(field_content).strip()
+        
+        if change['issue_title']:  # Only add if we have a title
+            changes.append(change)
+    
+    return changes
+
 # Import v3.0 features (optional - graceful degradation if not available)
 try:
     from agent_tools import (
@@ -2422,9 +2585,9 @@ class DynamicAgentFactory:
                 logger.warning(f"Web research not available, skipping {agent_type}")
                 return None
             
-            # Add language instruction
+            # Add language instruction and issue format
             language_instruction = f"\n\n**IMPORTANT**: Provide your entire review in {self.output_language} language."
-            instructions = template["instructions"] + language_instruction
+            instructions = template["instructions"] + language_instruction + "\n\n" + ISSUE_FORMAT_INSTRUCTION
             
             agent = Agent(
                 name=template["name"].replace(" ", "_"),
@@ -2432,27 +2595,29 @@ class DynamicAgentFactory:
                 model=model,
                 temperature=1.0,
                 max_output_tokens=self.config.max_output_tokens,
-                use_caching=self.config.use_prompt_caching
+                use_caching=self.config.use_prompt_caching,
+                config=self.config  # ✅ Pass config for API key!
             )
             
             # Mark as web research agent
             agent.use_web_search = True
             agent.use_tools = False
             
-            logger.info(f"Created agent '{template['name']}' with WEB SEARCH capability")
+            # Intriguing log with icon and web capability
+            icon = template.get('icon', '🤖')
+            logger.info(f"   {icon} {template['name']:.<40} ⚡ {model} [🌐 Web Search]")
             return agent
         
         # Special handling for data_validator with tools
         if agent_type == "data_validator" and self.enable_python_tools and AGENT_TOOLS_AVAILABLE:
             instructions = create_data_validator_instructions_with_tools()
             language_instruction = f"\n\n**IMPORTANT**: Provide your entire review in {self.output_language} language."
-            instructions = instructions + language_instruction
+            instructions = instructions + language_instruction + "\n\n" + ISSUE_FORMAT_INSTRUCTION
             use_tools = True
-            logger.info(f"Created agent '{template['name']}' with Python execution tools")
         else:
-            # Add language instruction and end marker
+            # Add language instruction, issue format, and end marker
             language_instruction = f"\n\n**IMPORTANT**: Provide your entire review in {self.output_language} language."
-            instructions = template["instructions"] + language_instruction + f'\n\nEnd your review with: "REVIEW COMPLETED - {template["name"]}"'
+            instructions = template["instructions"] + language_instruction + "\n\n" + ISSUE_FORMAT_INSTRUCTION + f'\n\nEnd your review with: "REVIEW COMPLETED - {template["name"]}"'
             use_tools = False
         
         agent = Agent(
@@ -2461,15 +2626,22 @@ class DynamicAgentFactory:
             model=model,
             temperature=1.0,
             max_output_tokens=self.config.max_output_tokens,
-            use_caching=self.config.use_prompt_caching
+            use_caching=self.config.use_prompt_caching,
+            config=self.config  # ✅ Pass config for API key!
         )
         
         # Mark agent for tool usage
         agent.use_tools = use_tools
         agent.use_web_search = False
         
-        logger.info(f"Created agent '{template['name']}' using model '{model}'" + 
-                   (" with tools" if use_tools else ""))
+        # Intriguing log with icon and capabilities
+        icon = template.get('icon', '🤖')
+        capabilities = []
+        if use_tools:
+            capabilities.append("🔧 Python")
+        capabilities_str = f" [{', '.join(capabilities)}]" if capabilities else ""
+        
+        logger.info(f"   {icon} {template['name']:.<40} ⚡ {model}{capabilities_str}")
         return agent
     
     def create_coordinator_agent(self) -> Agent:
@@ -2501,7 +2673,8 @@ End with: "COORDINATOR ASSESSMENT COMPLETED" """,
             model=self.config.model_powerful,
             temperature=1.0,
             max_output_tokens=self.config.max_output_tokens,
-            use_caching=self.config.use_prompt_caching
+            use_caching=self.config.use_prompt_caching,
+            config=self.config  # ✅ Pass config for API key!
         )
     
     def create_final_evaluator_agent(self) -> Agent:
@@ -2525,7 +2698,8 @@ End with: "FINAL EVALUATION COMPLETED" """,
             model=self.config.model_powerful,
             temperature=1.0,
             max_output_tokens=self.config.max_output_tokens,
-            use_caching=self.config.use_prompt_caching
+            use_caching=self.config.use_prompt_caching,
+            config=self.config  # ✅ Pass config for API key!
         )
     
     def create_all_agents(self) -> Dict[str, Agent]:
@@ -2540,7 +2714,10 @@ End with: "FINAL EVALUATION COMPLETED" """,
         
         # TIER 1: Always include core agents (essential for any review)
         tier1_core = ["style_editor", "consistency_checker", "fact_checker", "logic_checker", "technical_expert"]
-        logger.info(f"[TIER 1] Creating {len(tier1_core)} core agents (always active)")
+        logger.info("")
+        logger.info("="*60)
+        logger.info(f"🛡️  TIER 1: CORE DEFENSE LINE - {len(tier1_core)} Essential Agents")
+        logger.info("="*60)
         
         for agent_type in tier1_core:
             agent = self.create_agent(agent_type)
@@ -2550,7 +2727,10 @@ End with: "FINAL EVALUATION COMPLETED" """,
         # TIER 2: Create document-specific agents from classifier suggestions
         tier2_agents = [a for a in self.document_type.suggested_agents 
                         if a not in tier1_core and AgentTemplateLibrary.AGENT_TIERS.get(a, 2) == 2]
-        logger.info(f"[TIER 2] Creating {len(tier2_agents)} document-specific agents")
+        logger.info("")
+        logger.info("-"*60)
+        logger.info(f"🎯 TIER 2: SPECIALIST SQUAD - {len(tier2_agents)} Domain Experts")
+        logger.info("-"*60)
         
         for agent_type in tier2_agents:
             agent = self.create_agent(agent_type)
@@ -2561,7 +2741,10 @@ End with: "FINAL EVALUATION COMPLETED" """,
         if self.deep_review:
             tier3_agents = [a for a in self.document_type.suggested_agents 
                             if AgentTemplateLibrary.AGENT_TIERS.get(a, 2) == 3]
-            logger.info(f"[TIER 3] Creating {len(tier3_agents)} deep-dive specialists (--deep-review active)")
+            logger.info("")
+            logger.info("*"*60)
+            logger.info(f"🚀 TIER 3: ELITE FORCES - {len(tier3_agents)} Deep-Dive Specialists")
+            logger.info("*"*60)
             
             for agent_type in tier3_agents:
                 agent = self.create_agent(agent_type)
@@ -2571,13 +2754,27 @@ End with: "FINAL EVALUATION COMPLETED" """,
             tier3_count = len([a for a in self.document_type.suggested_agents 
                               if AgentTemplateLibrary.AGENT_TIERS.get(a, 2) == 3])
             if tier3_count > 0:
-                logger.info(f"[TIER 3] Skipping {tier3_count} deep-dive specialists (use --deep-review to enable)")
+                logger.info("")
+                logger.info(f"💤 TIER 3: {tier3_count} elite specialists on standby (use --deep-review to deploy)")
         
         # Always create coordinator and evaluator
+        logger.info("")
+        logger.info("+"*60)
+        logger.info("👑 COMMAND CENTER: Deploying Coordination Team")
+        logger.info("+"*60)
         agents["coordinator"] = self.create_coordinator_agent()
+        logger.info("   👑 Review Coordinator........................ ⚡ gpt-5 [Synthesis]")
         agents["final_evaluator"] = self.create_final_evaluator_agent()
+        logger.info("   ⭐ Final Evaluator........................... ⚡ gpt-5 [Scoring]")
         
-        logger.info(f"✅ Created {len(agents)} total agents for document review (Tier 1: {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 1])}, Tier 2: {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 2])}, Tier 3: {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 3])})")
+        logger.info("")
+        logger.info("="*60)
+        logger.info(f"🎉 DEPLOYMENT COMPLETE: {len(agents)} AI Agents Ready for Battle!")
+        logger.info(f"   🛡️  Tier 1 (Core): {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 1])} agents")
+        logger.info(f"   🎯 Tier 2 (Specialists): {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 2])} agents")
+        logger.info(f"   🚀 Tier 3 (Elite): {len([a for a in agents if AgentTemplateLibrary.AGENT_TIERS.get(a, 0) == 3])} agents")
+        logger.info("="*60)
+        logger.info("")
         return agents
 
 class GenericReviewOrchestrator:
@@ -2586,12 +2783,13 @@ class GenericReviewOrchestrator:
     def __init__(self, config: Config, output_language: str = "English", 
                  enable_python_tools: bool = False, reference_context: str = "",
                  enable_web_research: bool = None, disable_web_research: bool = False,
-                 deep_review: bool = False):
+                 deep_review: bool = False, progress_callback=None):
         self.config = config
         self.output_language = output_language
         self.enable_python_tools = enable_python_tools
         self.reference_context = reference_context
         self.deep_review = deep_review  # Enable Tier 3 specialists
+        self.progress_callback = progress_callback  # ✅ For live updates
         self.file_manager = FileManager(config.output_dir)
         self.classifier = DocumentClassifier(config, enable_web_research, disable_web_research)
         self.document_type: Optional[DocumentType] = None
@@ -2629,20 +2827,28 @@ class GenericReviewOrchestrator:
             
             # Step 4: Execute reviews in parallel
             logger.info(f"\n[STEP 4] Executing {len(self.agents) - 2} expert reviews in parallel...")
+            if self.progress_callback:
+                await self.progress_callback(50, f"🤖 Analyzing with {len(self.agents) - 2} expert agents...")
             reviews = await self._execute_parallel_reviews(review_message)
             
             # Step 5: Run coordinator
             logger.info(f"\n[STEP 5] Synthesizing reviews (Coordinator)...")
+            if self.progress_callback:
+                await self.progress_callback(75, "👑 Coordinator synthesizing feedback...")
             coordinator_review = await self._execute_coordinator(reviews)
             reviews["coordinator"] = coordinator_review
             
             # Step 6: Run final evaluator
             logger.info(f"\n[STEP 6] Generating final evaluation...")
+            if self.progress_callback:
+                await self.progress_callback(85, "⭐ Generating final evaluation...")
             final_evaluation = await self._execute_final_evaluator(reviews)
             
             # Step 7: Compile results
             logger.info(f"\n[STEP 7] Compiling results and generating reports...")
-            final_results = self._compile_results(document_title, reviews, final_evaluation)
+            if self.progress_callback:
+                await self.progress_callback(95, "📝 Compiling reports...")
+            final_results = self._compile_results(document_title, document_text, reviews, final_evaluation)
             
             # Step 8: Generate reports
             self._generate_reports(final_results)
@@ -2759,58 +2965,97 @@ Document Content:
                 logger.warning(f"No research data found for {agent.name}, using standard execution")
                 return agent.run(message)
         
-        # Check if agent uses web search (Responses API)
+        # Check if agent uses web search - OpenAI Responses API (cookbook pattern)
         elif hasattr(agent, 'use_web_search') and agent.use_web_search and WEB_RESEARCH_AVAILABLE:
-            logger.info(f"🌐 Executing {agent.name} with WEB SEARCH")
+            logger.info(f"🌐 Executing {agent.name} with WEB SEARCH (OpenAI Responses API)")
             
-            # Try OpenAI Responses API first
             try:
-                # Execute with timeout to prevent hanging (90 seconds max)
-                import concurrent.futures
+                from openai import OpenAI
+                client = OpenAI(api_key=self.config.api_key)
                 
-                # Create executor for timeout
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        execute_web_research_agent,
-                        api_key=self.config.api_key,
-                        model=agent.model,
-                        message=f"{agent.instructions}\n\n{message}",
-                        agent_type="researcher"
-                    )
+                # COOKBOOK PATTERN - exactly as user provided!
+                # gpt-5, gpt-5-mini, gpt-5-nano ALL support web_search in Responses API!
+                logger.info(f"📡 Calling OpenAI Responses API with {agent.model} + web_search...")
+                
+                resp = client.responses.create(
+                    model=agent.model,  # Use configured model (gpt-5, gpt-5-mini, gpt-5-nano)
+                    input=f"{agent.instructions}\n\n{message}",  # Simple string!
+                    tools=[{"type": "web_search"}],
+                    tool_choice="required"  # Force web search usage!
+                )
+                
+                # CORRECT extraction: citations are in output[0].content[0].annotations
+                text = getattr(resp, "output_text", "") or ""
+                
+                # DEBUG: Full response structure
+                logger.debug(f"Response type: {type(resp)}")
+                logger.debug(f"Response dir: {[x for x in dir(resp) if not x.startswith('_')]}")
+                
+                # Extract citations from CORRECT location: output[*].content[*].annotations
+                # where content type is 'output_text' (not 'text'!)
+                citations = []
+                tool_used = False
+                try:
+                    if hasattr(resp, 'output') and resp.output:
+                        logger.debug(f"Output length: {len(resp.output)}")
+                        for output_item in resp.output:
+                            item_type = getattr(output_item, 'type', 'unknown')
+                            logger.debug(f"Output item type: {item_type}")
+                            
+                            # Check if web_search tool was used
+                            if item_type == 'web_search_call':
+                                tool_used = True
+                                logger.info(f"✅ Tool used: web_search")
+                            
+                            # Extract citations from message content
+                            if item_type == 'message':
+                                content = getattr(output_item, 'content', [])
+                                logger.debug(f"Content length: {len(content)}")
+                                for content_item in content:
+                                    content_type = getattr(content_item, 'type', 'unknown')
+                                    logger.debug(f"Content type: {content_type}")
+                                    
+                                    # Citations are in 'output_text' type (NOT 'text'!)
+                                    if content_type == 'output_text':
+                                        annotations = getattr(content_item, 'annotations', [])
+                                        logger.debug(f"Found {len(annotations)} annotations in output_text")
+                                        for ann in annotations:
+                                            ann_type = getattr(ann, 'type', '')
+                                            logger.debug(f"Annotation type: {ann_type}")
+                                            if ann_type == 'url_citation':
+                                                citations.append(ann)
+                        
+                        if not tool_used:
+                            logger.warning(f"⚠️ Web search tool was NOT used despite tool_choice='required'!")
                     
-                    # Wait with timeout (90 seconds for web research)
-                    try:
-                        result = future.result(timeout=90)
-                        logger.info(f"✅ {agent.name} OpenAI web search completed successfully")
-                        return result
-                    except concurrent.futures.TimeoutError:
-                        logger.warning(f"⏱️ {agent.name} OpenAI web search timed out after 90s")
-                        future.cancel()
-                        # Will try Tavily fallback below
-                        raise TimeoutError("OpenAI Responses API timeout")
-                        
+                    logger.info(f"📋 Extracted {len(citations)} citations from response")
+                    
+                except Exception as e:
+                    logger.error(f"Error extracting citations: {e}", exc_info=True)
+                
+                # Format citations
+                sources = []
+                for c in citations:
+                    title = getattr(c, "title", "") or "Source"
+                    url = getattr(c, "url", "")
+                    logger.debug(f"Citation: title='{title}', url='{url}'")
+                    if url:
+                        sources.append(f"- {title} — {url}")
+                
+                # Combine text + sources
+                result = text
+                if sources:
+                    result += "\n\n📚 Fonti:\n" + "\n".join(sources)
+                else:
+                    logger.warning(f"⚠️ {agent.name} web search returned NO sources (tool might not have been used)")
+                
+                logger.info(f"✅ {agent.name} web search completed: {len(text)} chars, {len(sources)} sources")
+                return result
+                
             except Exception as e:
-                logger.warning(f"OpenAI web search failed: {e}")
-                
-                # Try Tavily as fallback
-                if TAVILY_AVAILABLE:
-                    logger.info(f"🔄 Trying Tavily fallback for {agent.name}")
-                    try:
-                        # Extract query from message (first 500 chars for context)
-                        query = message[:500] + "..." if len(message) > 500 else message
-                        tavily_result = execute_tavily_research(agent.name, query)
-                        
-                        if not tavily_result.startswith("⚠️"):
-                            # Tavily succeeded - now let agent analyze the results
-                            combined_message = f"{message}\n\n---\n\n{tavily_result}"
-                            return agent.run(combined_message)
-                        else:
-                            logger.warning(f"Tavily also failed: {tavily_result}")
-                    except Exception as tavily_error:
-                        logger.error(f"Tavily fallback failed: {tavily_error}")
-                
-                # All web search methods failed - fallback to standard execution
-                logger.info(f"All web search methods failed - falling back to standard execution for {agent.name}")
+                logger.error(f"❌ OpenAI web search failed: {e}")
+                # Fallback to standard execution
+                logger.info(f"Falling back to standard execution for {agent.name}")
                 return agent.run(message)
         
         # Check if agent has Python tools enabled
@@ -2824,12 +3069,12 @@ Document Content:
                 {"role": "user", "content": message}
             ]
             
-            # Use tool-enabled execution
+            # Use tool-enabled execution (increased iterations for complex calculations)
             result = execute_agent_with_tools(
                 client=client,
                 model=agent.model,
                 messages=messages,
-                max_tool_iterations=10
+                max_tool_iterations=20  # Increased from 10 to handle complex validations
             )
             return result
         else:
@@ -2837,30 +3082,87 @@ Document Content:
             return agent.run(message)
     
     async def _execute_parallel_reviews(self, message: str) -> Dict[str, str]:
-        """Execute all review agents in parallel."""
+        """Execute all review agents in parallel with real-time updates."""
         review_agents = {k: v for k, v in self.agents.items() 
                         if k not in ["coordinator", "final_evaluator"]}
         
-        tasks = []
-        agent_names = []
+        total = len(review_agents)
+        completed = 0
+        reviews = {}
+        
+        # Create tasks with names - run_in_executor returns Future, not coroutine
+        task_to_name = {}
+        loop = asyncio.get_running_loop()
         
         for name, agent in review_agents.items():
-            agent_names.append(name)
-            loop = asyncio.get_running_loop()
-            tasks.append(loop.run_in_executor(None, self._execute_agent_with_optional_tools, agent, message))
+            # Send "started" notification
+            if self.progress_callback:
+                agent_display = name.replace('_', ' ').title()
+                icon = self._get_agent_icon(name)
+                # Format: AGENT_ANALYZING|icon|name|count
+                status_msg = f"AGENT_ANALYZING|{icon}|{agent_display}|{completed}/{total}"
+                await self.progress_callback(
+                    50 + int((completed / total) * 20),
+                    status_msg
+                )
+            
+            # Create Future directly (run_in_executor returns Future, not coroutine)
+            future = loop.run_in_executor(None, self._execute_agent_with_optional_tools, agent, message)
+            task_to_name[future] = name
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        reviews = {}
-        for name, result in zip(agent_names, results):
-            if isinstance(result, Exception):
-                logger.error(f"Error in agent {name}: {result}")
-                reviews[name] = f"Error during review: {result}"
-            else:
-                reviews[name] = result
-                self.file_manager.save_review(name, result)
+        # Process tasks as they complete (in real-time!)
+        pending = set(task_to_name.keys())
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            
+            for task in done:
+                name = task_to_name[task]
+                try:
+                    result = task.result()
+                    reviews[name] = result
+                    self.file_manager.save_review(name, result)
+                    completed += 1
+                    
+                    # Send "completed" notification
+                    if self.progress_callback:
+                        agent_display = name.replace('_', ' ').title()
+                        icon = self._get_agent_icon(name)
+                        progress = 50 + int((completed / total) * 20)  # 50-70%
+                        # Format: AGENT_COMPLETED|icon|name|count
+                        status_msg = f"AGENT_COMPLETED|{icon}|{agent_display}|{completed}/{total}"
+                        await self.progress_callback(progress, status_msg)
+                    
+                    logger.info(f"✅ {name} completed ({completed}/{total})")
+                    
+                except Exception as e:
+                    logger.error(f"❌ ERROR in agent {name}: {type(e).__name__}: {e}", exc_info=e)
+                    reviews[name] = f"Error during review: {e}"
+                    completed += 1
+                    
+                    if self.progress_callback:
+                        agent_display = name.replace('_', ' ').title()
+                        await self.progress_callback(
+                            50 + int((completed / total) * 20),
+                            f"⚠️ {agent_display} failed ({completed}/{total})"
+                        )
         
         return reviews
+    
+    def _get_agent_icon(self, agent_name: str) -> str:
+        """Get emoji icon for agent."""
+        icons = {
+            'style_editor': '✍️',
+            'consistency_checker': '🔄',
+            'fact_checker': '✓',
+            'logic_checker': '🧠',
+            'technical_expert': '⚙️',
+            'web_researcher': '🌐',
+            'data_validator': '🔢',
+            'legal_expert': '⚖️',
+            'financial_analyst': '💰',
+            'academic_researcher': '🎓',
+        }
+        return icons.get(agent_name, '🤖')
     
     async def _execute_coordinator(self, reviews: Dict[str, str]) -> str:
         """Execute coordinator synthesis."""
@@ -2886,7 +3188,7 @@ Please provide your comprehensive coordinator assessment based on all these revi
             self.file_manager.save_review("coordinator", result)
             return result
         except Exception as e:
-            logger.error(f"Error in coordinator: {e}")
+            logger.error(f"❌ ERROR in coordinator: {type(e).__name__}: {e}", exc_info=True)
             return f"Error in coordinator assessment: {str(e)}"
     
     async def _execute_final_evaluator(self, reviews: Dict[str, str]) -> str:
@@ -2912,23 +3214,98 @@ Please provide your final evaluation and recommendation."""
             self.file_manager.save_review("final_evaluator", result)
             return result
         except Exception as e:
-            logger.error(f"Error in final evaluator: {e}")
+            logger.error(f"❌ ERROR in final evaluator: {type(e).__name__}: {e}", exc_info=True)
             return f"Error in final evaluation: {str(e)}"
     
-    def _compile_results(self, title: str, reviews: Dict[str, str], 
+    def _compile_results(self, title: str, document_text: str, reviews: Dict[str, str], 
                         final_evaluation: str) -> Dict[str, Any]:
-        """Compile all results."""
+        """Compile all results including structured issues and proposed changes."""
+        # Extract structured issues and changes from all reviews
+        all_issues = []
+        all_changes = []
+        risk_by_category = {}
+        
+        for agent_name, review_text in reviews.items():
+            if agent_name in ["coordinator", "final_evaluator"]:
+                continue
+            
+            # Parse issues
+            issues = parse_structured_issues(review_text, agent_name)
+            all_issues.extend(issues)
+            
+            # Parse proposed changes
+            changes = parse_proposed_changes(review_text, agent_name)
+            all_changes.extend(changes)
+            
+            # Aggregate risk scores by category
+            for issue in issues:
+                category = issue['category']
+                severity_weight = {
+                    'critical': 4,
+                    'high': 3,
+                    'medium': 2,
+                    'low': 1
+                }.get(issue['severity'], 1)
+                
+                if category not in risk_by_category:
+                    risk_by_category[category] = {'count': 0, 'score': 0}
+                
+                risk_by_category[category]['count'] += 1
+                risk_by_category[category]['score'] += severity_weight * (issue['confidence'] / 100)
+        
+        logger.info(f"📊 Extracted {len(all_issues)} structured issues across {len(risk_by_category)} categories")
+        logger.info(f"✏️ Extracted {len(all_changes)} proposed text changes")
+        
+        # Detailed logging for issues
+        if all_issues:
+            severity_counts = {}
+            for issue in all_issues:
+                sev = issue['severity']
+                severity_counts[sev] = severity_counts.get(sev, 0) + 1
+            
+            logger.info("📋 Issue breakdown:")
+            for sev in ['critical', 'high', 'medium', 'low']:
+                count = severity_counts.get(sev, 0)
+                if count > 0:
+                    logger.info(f"   - {sev.upper()}: {count}")
+        
+        # Detailed logging for changes
+        if all_changes:
+            change_types = {}
+            for change in all_changes:
+                ctype = change['type']
+                change_types[ctype] = change_types.get(ctype, 0) + 1
+            
+            logger.info("✏️ Proposed changes breakdown:")
+            for ctype, count in change_types.items():
+                logger.info(f"   - {ctype.upper()}: {count}")
+        
+        # Detailed logging for risk heatmap
+        if risk_by_category:
+            logger.info("🔥 Risk heatmap by category:")
+            sorted_risks = sorted(risk_by_category.items(), key=lambda x: x[1]['score'], reverse=True)
+            for category, data in sorted_risks[:5]:  # Top 5 risks
+                logger.info(f"   - {category}: {data['count']} issues, risk score: {data['score']:.1f}")
+        
         return {
             "document_info": {
                 "title": title,
                 "type": self.document_type.to_dict(),
-                "length": len(reviews.get(list(reviews.keys())[0], "")),  # Approximate
+                "length": len(document_text),
                 "review_date": datetime.now().isoformat()
             },
-            "reviews": reviews,
+            "document_text": document_text,  # ✅ NEW: For applying changes
+            "agent_reviews": reviews,
             "final_evaluation": final_evaluation,
+            "output_dir": self.config.output_dir,
+            "structured_issues": all_issues,  # ✅ For Evidence-First UI
+            "proposed_changes": all_changes,  # ✅ NEW: For Redline Editor
+            "risk_heatmap": risk_by_category,  # ✅ For heatmap visualization
             "metadata": {
                 "num_reviewers": len([r for r in reviews.keys() if r not in ["coordinator"]]),
+                "total_agents": len(reviews),
+                "total_issues": len(all_issues),
+                "total_changes": len(all_changes),
                 "models_used": {
                     "powerful": self.config.model_powerful,
                     "standard": self.config.model_standard,
@@ -2957,7 +3334,7 @@ Please provide your final evaluation and recommendation."""
     def _generate_markdown_report(self, results: Dict[str, Any]) -> str:
         """Generate markdown report."""
         doc_info = results["document_info"]
-        reviews = results["reviews"]
+        reviews = results.get("agent_reviews", results.get("reviews", {}))
         final_eval = results["final_evaluation"]
         doc_type = doc_info["type"]
         
@@ -3000,7 +3377,7 @@ Please provide your final evaluation and recommendation."""
     def _generate_html_dashboard(self, results: Dict[str, Any]) -> str:
         """Generate HTML dashboard."""
         doc_info = results["document_info"]
-        reviews = results["reviews"]
+        reviews = results.get("agent_reviews", results.get("reviews", {}))
         final_eval = results["final_evaluation"]
         doc_type = doc_info["type"]
         
@@ -3157,7 +3534,7 @@ class IterativeReviewOrchestrator:
                  max_iterations: int = 3, target_score: float = 85.0, interactive: bool = False,
                  enable_python_tools: bool = False, reference_context: str = "",
                  enable_web_research: bool = None, disable_web_research: bool = False,
-                 deep_review: bool = False):
+                 deep_review: bool = False, progress_callback=None):
         self.config = config
         self.output_language = output_language
         self.max_iterations = max_iterations
@@ -3166,6 +3543,7 @@ class IterativeReviewOrchestrator:
         self.interactive = interactive
         self.enable_python_tools = enable_python_tools
         self.reference_context = reference_context
+        self.progress_callback = progress_callback  # ✅ For live updates
         self.file_manager = FileManager(config.output_dir)
         self.base_orchestrator = GenericReviewOrchestrator(
             config, output_language, 
@@ -3173,7 +3551,8 @@ class IterativeReviewOrchestrator:
             reference_context=reference_context,
             enable_web_research=enable_web_research,
             disable_web_research=disable_web_research,
-            deep_review=deep_review
+            deep_review=deep_review,
+            progress_callback=progress_callback  # ✅ Pass callback!
         )
         self.scorer = DocumentScorer(config, output_language)
         self.refiner = DocumentRefiner(config, output_language, interactive)
@@ -3847,7 +4226,7 @@ def _open_file_dialogs():
     }
 
 
-def main():
+async def main():
     """Main function for generic document review."""
     import argparse
     
@@ -4009,11 +4388,11 @@ def main():
         
         # Check for batch processing mode
         if args.batch_dir or args.batch_zip:
-            return asyncio.run(_handle_batch_processing(args, config, reference_manager, tracker))
+            return await _handle_batch_processing(args, config, reference_manager, tracker)
         
         # Check for resume mode
         if args.resume:
-            return asyncio.run(_handle_resume(args, config, tracker))
+            return await _handle_resume(args, config, tracker)
         
         # Single document mode
         if not args.document_path:
@@ -4054,7 +4433,7 @@ def main():
             # Quick classification to detect language
             logger.info("\nDetecting document language...")
             classifier = DocumentClassifier(config)
-            doc_type = asyncio.run(classifier.classify_document(document_text))
+            doc_type = await classifier.classify_document(document_text)
             detected_lang = doc_type.detected_language
             lang_confidence = doc_type.language_confidence
             
@@ -4127,7 +4506,7 @@ def main():
                     deep_review=args.deep_review
                 )
                 
-                results = asyncio.run(orchestrator.execute_iterative_review(document_text, title))
+                results = await orchestrator.execute_iterative_review(document_text, title)
                 
                 # Complete progress
                 if progress_orchestrator:
@@ -4151,7 +4530,7 @@ def main():
                     deep_review=args.deep_review
                 )
                 
-                results = asyncio.run(orchestrator.execute_review_process(document_text, title))
+                results = await orchestrator.execute_review_process(document_text, title)
                 
                 # Complete progress
                 if progress_orchestrator:
@@ -4164,7 +4543,7 @@ def main():
             
             # Save to database if enabled
             if tracker:
-                asyncio.run(_save_to_database(tracker, results, config, args))
+                await _save_to_database(tracker, results, config, args)
                 logger.info(f"💾 Saved to database: {args.db_path}")
             
             return 0
@@ -4183,5 +4562,5 @@ def main():
 
 if __name__ == "__main__":
     import sys
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))
 

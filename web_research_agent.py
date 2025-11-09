@@ -52,84 +52,60 @@ class WebResearchAgent:
     def search(self, query: str, system_prompt: Optional[str] = None) -> WebSearchResult:
         """
         Perform web search and return results with citations.
+        SIMPLIFIED using cookbook pattern.
         
         Args:
             query: Search query or question
-            system_prompt: Optional system prompt to guide the search
+            system_prompt: Optional system prompt (prepended to query)
         
         Returns:
             WebSearchResult with text and citations
         """
-        if not system_prompt:
-            system_prompt = (
-                "You are a research assistant. When using web search, always cite sources "
-                "at the end of your response. Be accurate and fact-based."
-            )
-        
         try:
             logger.info(f"🔍 Web search starting: {query[:100]}...")
             logger.debug(f"Using model: {self.model}")
             
-            # Call Responses API with web_search tool
-            logger.debug("Calling client.responses.create()...")
+            # Prepend system prompt to query if provided
+            full_query = query
+            if system_prompt:
+                full_query = f"{system_prompt}\n\n{query}"
+            
+            # SIMPLIFIED: Use cookbook pattern - direct string input
+            logger.debug("Calling client.responses.create() [SIMPLIFIED]...")
             resp = self.client.responses.create(
                 model=self.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": [{"type": "input_text", "text": system_prompt}]
-                    },
-                    {
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": query}]
-                    }
-                ],
-                tools=[{"type": "web_search"}],  # Enable native web search
+                input=full_query,  # Simple string input!
+                tools=[{"type": "web_search"}],
+                tool_choice="auto"  # Let model decide
             )
             
-            logger.debug(f"Response received, ID: {resp.id}")
+            logger.debug(f"✅ Response received, ID: {resp.id}")
             
             # Store conversation ID for follow-ups
             self.conversation_id = resp.id
             
-            # Extract message and citations
-            logger.debug(f"Response output type: {type(resp.output)}")
-            logger.debug(f"Response output length: {len(resp.output) if resp.output else 0}")
+            # SIMPLIFIED: Extract text directly
+            text = getattr(resp, "output_text", "") or ""
             
-            msg = next((o for o in resp.output if getattr(o, "type", None) == "message"), None)
+            # SIMPLIFIED: Extract citations directly
+            citations_list = []
+            citations = getattr(resp, "citations", None) or []
             
-            if not msg:
-                logger.warning("No message in response output!")
-                logger.debug(f"Output items: {[getattr(o, 'type', None) for o in resp.output]}")
+            for c in citations:
+                title = getattr(c, "title", "")
+                url = getattr(c, "url", "")
+                if url:
+                    citations_list.append(f"{title} — {url}")
             
-            text = ""
-            urls = []
             
-            if msg and msg.content:
-                logger.debug(f"Message content length: {len(msg.content)}")
-                block = msg.content[0]
-                text = getattr(block, "text", "") or getattr(block, "value", "")
-                logger.debug(f"Extracted text length: {len(text)}")
-                
-                # Extract URL citations from annotations
-                annotations = getattr(block, "annotations", []) or []
-                logger.debug(f"Annotations found: {len(annotations)}")
-                urls = [a.url for a in annotations if getattr(a, "type", "") == "url_citation"]
-                logger.debug(f"URL citations extracted: {len(urls)}")
-            else:
-                logger.warning("No content in message!")
+            if citations_list:
+                logger.info(f"📚 Sources: {citations_list[:3]}{'...' if len(citations_list) > 3 else ''}")
             
-            result = WebSearchResult(
+            return WebSearchResult(
                 text=text,
-                citations=urls,
-                sources_count=len(urls)
+                citations=citations_list,
+                sources_count=len(citations_list)
             )
-            
-            logger.info(f"✅ Web search completed: {result.sources_count} sources found, {len(text)} chars")
-            if urls:
-                logger.info(f"📚 Sources: {urls[:3]}{'...' if len(urls) > 3 else ''}")
-            
-            return result
             
         except Exception as e:
             import traceback
@@ -144,6 +120,7 @@ class WebResearchAgent:
     def follow_up(self, query: str) -> WebSearchResult:
         """
         Continue conversation with follow-up query, maintaining context.
+        SIMPLIFIED using cookbook pattern.
         
         Args:
             query: Follow-up question or request
@@ -158,38 +135,36 @@ class WebResearchAgent:
         try:
             logger.info(f"Follow-up search: {query[:100]}...")
             
-            # Continue conversation using previous_response_id
+            # SIMPLIFIED: Continue conversation using previous_response_id
             resp = self.client.responses.create(
                 model=self.model,
-                input=query,
+                input=query,  # Simple string!
                 previous_response_id=self.conversation_id,  # Maintains context
                 tools=[{"type": "web_search"}],
+                tool_choice="auto"
             )
             
             # Update conversation ID
             self.conversation_id = resp.id
             
-            # Extract message and citations
-            msg = next((o for o in resp.output if getattr(o, "type", None) == "message"), None)
+            # SIMPLIFIED: Extract directly like cookbook
+            text = getattr(resp, "output_text", "") or ""
+            citations_list = []
+            citations = getattr(resp, "citations", None) or []
             
-            text = ""
-            urls = []
+            for c in citations:
+                title = getattr(c, "title", "")
+                url = getattr(c, "url", "")
+                if url:
+                    citations_list.append(f"{title} — {url}")
             
-            if msg and msg.content:
-                block = msg.content[0]
-                text = getattr(block, "text", "") or getattr(block, "value", "")
-                annotations = getattr(block, "annotations", []) or []
-                urls = [a.url for a in annotations if getattr(a, "type", "") == "url_citation"]
+            logger.info(f"Follow-up completed: {len(citations_list)} sources found")
             
-            result = WebSearchResult(
+            return WebSearchResult(
                 text=text,
-                citations=urls,
-                sources_count=len(urls)
+                citations=citations_list,
+                sources_count=len(citations_list)
             )
-            
-            logger.info(f"Follow-up completed: {result.sources_count} sources found")
-            
-            return result
             
         except Exception as e:
             logger.error(f"Follow-up search failed: {e}")
