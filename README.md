@@ -42,6 +42,14 @@ Sistema avanzato di revisione documenti alimentato da IA che utilizza un team di
 - 📦 **Batch Processing**: Analisi parallela multipli documenti
 - 🌐 **Web Search Integrato**: Citazioni automatiche con fonti
 
+### 🎨 Gamma AI Integration (NEW!)
+- 📊 **Auto-Generate Presentations**: Crea slide professionali dal report
+- 🖼️ **AI-Generated Images**: Powered by Imagen-4-Pro
+- 📈 **Smart Formatting**: Risk heatmaps, issue breakdowns, recommendations
+- 💾 **Export Options**: PDF o PPTX
+- 🎭 **Multiple Themes**: Oasis, Prism, Chisel, e molti altri
+- 🚀 **One-Click**: API endpoint per generazione automatica
+
 ## 🚀 Quick Start
 
 ### Prerequisiti
@@ -285,12 +293,14 @@ GET  /api/analytics/trends      # Trend score
 GET  /api/analytics/comparison  # Confronto versioni
 GET  /api/analytics/agents-performance # Performance agenti
 POST /api/review/{review_id}/apply-changes # Applica modifiche
+POST /api/review/{review_id}/create-presentation # 🎨 Crea presentazione Gamma
 ```
 
 ### Variabili d'Ambiente
 
 ```bash
 OPENAI_API_KEY=sk-...           # Obbligatorio
+GAMMA_API_KEY=sk-gamma-...      # Opzionale (per generazione presentazioni)
 TAVILY_API_KEY=tvly-...         # Opzionale (web search fallback)
 LOG_LEVEL=INFO                  # DEBUG, INFO, WARNING, ERROR
 ```
@@ -303,6 +313,27 @@ LOG_LEVEL=INFO                  # DEBUG, INFO, WARNING, ERROR
 4. **Explore Results**: Three-panel layout con issues evidenziate
 5. **Edit**: Accept/Reject modifiche proposte
 6. **Download**: Report MD/JSON/HTML
+7. **🎨 Create Presentation**: Genera slide professionali automaticamente
+
+## 🎨 Gamma Presentations - Quick Example
+
+```bash
+# Dopo aver completato una review
+curl -X POST "http://localhost:8000/api/review/review_20251109/create-presentation" \
+  -H "Content-Type: application/json" \
+  -d '{"export_format": "pdf"}'
+
+# Response:
+{
+  "success": true,
+  "gamma_url": "https://gamma.app/docs/...",  # View online
+  "export_url": "https://cdn.gamma.app/...", # Download PDF
+  "local_file": "./outputs/presentation.pdf",
+  "message": "Presentation created successfully!"
+}
+```
+
+**Vedi** [GAMMA_INTEGRATION.md](GAMMA_INTEGRATION.md) per setup completo.
 
 ## 📚 Documentazione
 
@@ -314,6 +345,7 @@ LOG_LEVEL=INFO                  # DEBUG, INFO, WARNING, ERROR
 - [Academic Search](ACADEMIC_SEARCH_README.md)
 - [Agent Tools](AGENT_TOOLS_README.md)
 - [Funzionalità Avanzate](FUNZIONALITA_AVANZATE.md)
+- [🎨 Gamma Presentations](GAMMA_INTEGRATION.md) **(NEW!)**
 
 ### Setup & Troubleshooting
 - [React UI Setup](REACT_SETUP.md)
