@@ -834,6 +834,75 @@ async def get_agents_performance(days: int = 30):
         logger.error(f"Error getting agent performance: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/review/{review_id}/create-presentation")
+async def create_presentation(review_id: str, theme_id: Optional[str] = None, export_format: str = "pdf"):
+    """
+    Create Gamma presentation from review results.
+    
+    Args:
+        review_id: ID of completed review
+        theme_id: Optional Gamma theme ID (default: "Oasis")
+        export_format: "pdf" or "pptx"
+    
+    Returns:
+        Presentation URLs and local path
+    """
+    try:
+        logger.info(f"🎨 Creating Gamma presentation for review: {review_id}")
+        
+        # Load review results
+        timestamp = review_id.replace("review_", "")
+        output_dirs = list(Path("outputs").glob(f"*_{timestamp}"))
+        
+        if not output_dirs:
+            raise HTTPException(status_code=404, detail=f"Review {review_id} not found")
+        
+        output_dir = output_dirs[0]
+        results_file = output_dir / "review_results.json"
+        
+        if not results_file.exists():
+            raise HTTPException(status_code=404, detail="Review results not found")
+        
+        with open(results_file, 'r', encoding='utf-8') as f:
+            review_results = json.load(f)
+        
+        # Check for Gamma API key
+        gamma_api_key = os.getenv("GAMMA_API_KEY") or app_config.gamma_api_key if hasattr(app_config, 'gamma_api_key') else None
+        
+        if not gamma_api_key:
+            raise HTTPException(
+                status_code=400, 
+                detail="Gamma API key not configured. Add GAMMA_API_KEY to environment or config.yaml"
+            )
+        
+        # Import and use Gamma integration
+        from gamma_integration import create_presentation_from_review
+        
+        presentation_info = create_presentation_from_review(
+            review_results=review_results,
+            gamma_api_key=gamma_api_key,
+            output_dir=str(output_dir),
+            theme_id=theme_id,
+            export_format=export_format
+        )
+        
+        logger.info(f"✅ Presentation created: {presentation_info.get('gamma_url')}")
+        
+        return {
+            "success": True,
+            "generation_id": presentation_info['generation_id'],
+            "gamma_url": presentation_info['gamma_url'],
+            "export_url": presentation_info['export_url'],
+            "local_file": presentation_info['local_path'],
+            "message": f"Presentation created successfully! View at {presentation_info['gamma_url']}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error creating presentation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for real-time updates"""
