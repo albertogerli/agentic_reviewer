@@ -48,7 +48,8 @@ Sistema avanzato di revisione documenti alimentato da IA che utilizza un team di
 - 📈 **Smart Formatting**: Risk heatmaps, issue breakdowns, recommendations
 - 💾 **Export Options**: PDF o PPTX
 - 🎭 **Multiple Themes**: Oasis, Prism, Chisel, e molti altri
-- 🚀 **One-Click**: API endpoint per generazione automatica
+- 🚀 **One-Click from React UI**: Bottone nella web app su localhost
+- 🌐 **View & Edit Online**: Apri su gamma.app per personalizzare
 
 ## 🚀 Quick Start
 
@@ -346,6 +347,7 @@ curl -X POST "http://localhost:8000/api/review/review_20251109/create-presentati
 - [Agent Tools](AGENT_TOOLS_README.md)
 - [Funzionalità Avanzate](FUNZIONALITA_AVANZATE.md)
 - [🎨 Gamma Presentations](GAMMA_INTEGRATION.md) **(NEW!)**
+- [🚀 Gamma Quick Start](GAMMA_QUICK_START.md) - **Setup in 2 min!**
 
 ### Setup & Troubleshooting
 - [React UI Setup](REACT_SETUP.md)
