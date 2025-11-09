@@ -866,13 +866,24 @@ async def create_presentation(review_id: str, theme_id: Optional[str] = None, ex
         with open(results_file, 'r', encoding='utf-8') as f:
             review_results = json.load(f)
         
-        # Check for Gamma API key
-        gamma_api_key = os.getenv("GAMMA_API_KEY") or app_config.gamma_api_key if hasattr(app_config, 'gamma_api_key') else None
+        # Load app config to get gamma_api_key
+        from main import Config as AppConfig
+        config_path = Path(__file__).parent.parent / "config.yaml"
+        
+        try:
+            app_config = AppConfig.from_yaml(str(config_path))
+            logger.debug(f"📄 Config loaded, gamma_api_key present: {bool(app_config.gamma_api_key)}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load config.yaml: {e}")
+            app_config = AppConfig()  # Use defaults
+        
+        # Check for Gamma API key (ENV has priority, then config.yaml)
+        gamma_api_key = os.getenv("GAMMA_API_KEY") or app_config.gamma_api_key
         
         if not gamma_api_key:
             raise HTTPException(
                 status_code=400, 
-                detail="Gamma API key not configured. Add GAMMA_API_KEY to environment or config.yaml"
+                detail="Gamma API key not configured. Add GAMMA_API_KEY to environment or gamma_api_key to config.yaml. Get key from https://gamma.app/settings/api"
             )
         
         # Import and use Gamma integration
