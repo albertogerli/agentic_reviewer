@@ -125,6 +125,16 @@ use_prompt_caching: true
 # use_prompt_caching: true
 
 # ============================================
+# API KEYS (Optional)
+# ============================================
+# Tavily API key per web search fallback (opzionale)
+tavily_api_key: ""
+
+# Gamma API key per generazione presentazioni automatiche (opzionale)
+# Get from https://gamma.app/settings/api
+gamma_api_key: ""
+
+# ============================================
 # NOTE
 # ============================================
 # 

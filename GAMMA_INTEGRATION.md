@@ -34,15 +34,18 @@ Automatically generate professional slide presentations from document review res
 
 ### 2. Configure API Key
 
-**Option A: Environment Variable** (Recommended)
+**Option A: config.yaml** (Raccomandato)
+```yaml
+# config.yaml
+gamma_api_key: "sk-gamma-xxxxxxxx"
+```
+
+**Option B: Environment Variable**
 ```bash
 export GAMMA_API_KEY="sk-gamma-xxxxxxxx"
 ```
 
-**Option B: config.yaml**
-```yaml
-gamma_api_key: "sk-gamma-xxxxxxxx"
-```
+Il sistema cerca prima in `config.yaml`, poi nelle variabili d'ambiente.
 
 ### 3. Install Dependencies
 
