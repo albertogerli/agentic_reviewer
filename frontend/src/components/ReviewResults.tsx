@@ -13,6 +13,8 @@ export function ReviewResults() {
   const { results, reviewId, isProcessing } = useReviewStore();
   const [activeTab, setActiveTab] = useState<'summary' | 'agents' | 'evidence' | 'redline' | 'raw'>('summary');
   const [changes, setChanges] = useState<ProposedChange[]>([]);
+  const [isGeneratingPresentation, setIsGeneratingPresentation] = useState(false);
+  const [presentationUrl, setPresentationUrl] = useState<string | null>(null);
   
   // Initialize changes from results
   React.useEffect(() => {
@@ -66,6 +68,62 @@ export function ReviewResults() {
     } catch (error) {
       console.error('Error applying changes:', error);
       alert('❌ Error applying changes. Please try again.');
+    }
+  };
+
+  const handleCreatePresentation = async () => {
+    setIsGeneratingPresentation(true);
+    try {
+      console.log('🎨 Creating Gamma presentation...');
+      
+      const response = await fetch(`http://localhost:8000/api/review/${reviewId}/create-presentation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          export_format: 'pdf',
+          theme_id: 'Oasis' // Optional: customize theme
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to create presentation');
+      }
+
+      const result = await response.json();
+      console.log('✅ Presentation created:', result);
+      
+      setPresentationUrl(result.gamma_url);
+      
+      // Open Gamma presentation in new tab
+      if (result.gamma_url) {
+        window.open(result.gamma_url, '_blank');
+      }
+      
+      // Auto-download PDF if available
+      if (result.export_url) {
+        setTimeout(() => {
+          window.open(result.export_url, '_blank');
+        }, 1000);
+      }
+      
+      alert(`✅ Presentation created successfully!\n\n` +
+            `View online: ${result.gamma_url}\n\n` +
+            `PDF download started automatically.`);
+            
+    } catch (error: any) {
+      console.error('Error creating presentation:', error);
+      if (error.message.includes('Gamma API key not configured')) {
+        alert('⚠️ Gamma API key not configured.\n\n' +
+              'To enable presentations:\n' +
+              '1. Get API key from https://gamma.app/settings/api\n' +
+              '2. Add to config.yaml: gamma_api_key: "sk-gamma-xxx"\n' +
+              '3. Or set environment: export GAMMA_API_KEY="sk-gamma-xxx"');
+      } else {
+        alert(`❌ Error creating presentation: ${error.message}\n\nPlease try again or check the logs.`);
+      }
+    } finally {
+      setIsGeneratingPresentation(false);
     }
   };
   
@@ -133,7 +191,7 @@ export function ReviewResults() {
       </motion.div>
       
       {/* Download Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DownloadCard
           title="Markdown Report"
           description="Detailed review in markdown format"
@@ -154,6 +212,25 @@ export function ReviewResults() {
           icon={<ChartBarIcon className="w-8 h-8" />}
           color="green"
           onClick={() => handleDownload('html')}
+        />
+        <DownloadCard
+          title={isGeneratingPresentation ? "Generating..." : "🎨 Presentation"}
+          description={isGeneratingPresentation ? "Creating slides..." : "AI-generated slides (PDF)"}
+          icon={
+            isGeneratingPresentation ? (
+              <svg className="w-8 h-8 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+              </svg>
+            )
+          }
+          color="orange"
+          onClick={handleCreatePresentation}
+          disabled={isGeneratingPresentation}
         />
       </div>
       
@@ -415,27 +492,31 @@ interface DownloadCardProps {
   title: string;
   description: string;
   icon: React.ReactNode;
-  color: 'blue' | 'purple' | 'green';
+  color: 'blue' | 'purple' | 'green' | 'orange';
   onClick: () => void;
+  disabled?: boolean;
 }
 
-function DownloadCard({ title, description, icon, color, onClick }: DownloadCardProps) {
+function DownloadCard({ title, description, icon, color, onClick, disabled = false }: DownloadCardProps) {
   const colorClasses = {
     blue: 'from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700',
     purple: 'from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700',
     green: 'from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700',
+    orange: 'from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700',
   };
   
   return (
     <motion.button
-      whileHover={{ scale: 1.05, y: -5 }}
-      whileTap={{ scale: 0.95 }}
-      onClick={onClick}
+      whileHover={disabled ? {} : { scale: 1.05, y: -5 }}
+      whileTap={disabled ? {} : { scale: 0.95 }}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       className={`
         bg-gradient-to-br ${colorClasses[color]}
         text-white rounded-xl p-6 shadow-lg
         transition-all duration-300
         flex flex-col items-start space-y-3
+        ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:shadow-2xl'}
       `}
     >
       <div className="p-3 bg-white/20 rounded-lg">
@@ -446,7 +527,7 @@ function DownloadCard({ title, description, icon, color, onClick }: DownloadCard
         <p className="text-sm text-white/80 mt-1">{description}</p>
       </div>
       <div className="flex items-center text-sm font-medium mt-2">
-        <span>Download</span>
+        <span>{disabled ? 'Processing...' : 'Download'}</span>
         <DocumentArrowDownIcon className="w-4 h-4 ml-2" />
       </div>
     </motion.button>
