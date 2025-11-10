@@ -9,9 +9,10 @@ interface IssuesListProps {
   selectedIssue: Issue | null;
   onIssueClick: (issue: Issue) => void;
   onIssueHover: (issue: Issue | null) => void;
+  acceptedIssues: Set<string>;
 }
 
-export function IssuesList({ issues, selectedIssue, onIssueClick, onIssueHover }: IssuesListProps) {
+export function IssuesList({ issues, selectedIssue, onIssueClick, onIssueHover, acceptedIssues }: IssuesListProps) {
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'severity' | 'confidence'>('severity');
@@ -98,16 +99,21 @@ export function IssuesList({ issues, selectedIssue, onIssueClick, onIssueHover }
       {/* Issues List */}
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence>
-          {filteredIssues.map((issue, idx) => (
-            <IssueCard
-              key={idx}
-              issue={issue}
-              isSelected={selectedIssue === issue}
-              onClick={() => onIssueClick(issue)}
-              onMouseEnter={() => onIssueHover(issue)}
-              onMouseLeave={() => onIssueHover(null)}
-            />
-          ))}
+          {filteredIssues.map((issue, idx) => {
+            const issueId = `${issue.agent}-${issue.title}`;
+            const isAccepted = acceptedIssues.has(issueId);
+            return (
+              <IssueCard
+                key={idx}
+                issue={issue}
+                isSelected={selectedIssue === issue}
+                isAccepted={isAccepted}
+                onClick={() => onIssueClick(issue)}
+                onMouseEnter={() => onIssueHover(issue)}
+                onMouseLeave={() => onIssueHover(null)}
+              />
+            );
+          })}
         </AnimatePresence>
 
         {filteredIssues.length === 0 && (
@@ -124,12 +130,13 @@ export function IssuesList({ issues, selectedIssue, onIssueClick, onIssueHover }
 interface IssueCardProps {
   issue: Issue;
   isSelected: boolean;
+  isAccepted: boolean;
   onClick: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }
 
-function IssueCard({ issue, isSelected, onClick, onMouseEnter, onMouseLeave }: IssueCardProps) {
+function IssueCard({ issue, isSelected, isAccepted, onClick, onMouseEnter, onMouseLeave }: IssueCardProps) {
   const colors = getSeverityColors(issue.severity);
 
   return (
@@ -137,8 +144,10 @@ function IssueCard({ issue, isSelected, onClick, onMouseEnter, onMouseLeave }: I
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className={`p-4 border-b border-gray-200 cursor-pointer transition-all ${
-        isSelected 
+      className={`p-4 border-b border-gray-200 cursor-pointer transition-all relative ${
+        isAccepted
+          ? 'bg-green-50 border-l-4 border-l-green-500 opacity-75'
+          : isSelected 
           ? 'bg-primary-50 border-l-4 border-l-primary-500' 
           : 'hover:bg-gray-50 border-l-4 border-l-transparent'
       }`}
@@ -146,6 +155,19 @@ function IssueCard({ issue, isSelected, onClick, onMouseEnter, onMouseLeave }: I
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
+      {/* Accepted Badge */}
+      {isAccepted && (
+        <motion.div
+          initial={{ scale: 0, rotate: -180 }}
+          animate={{ scale: 1, rotate: 0 }}
+          className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1"
+        >
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+        </motion.div>
+      )}
+      
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
@@ -156,6 +178,11 @@ function IssueCard({ issue, isSelected, onClick, onMouseEnter, onMouseLeave }: I
             <span className="text-xs text-gray-500">
               {issue.confidence}% confidence
             </span>
+            {isAccepted && (
+              <span className="text-xs text-green-700 font-semibold">
+                ✓ Accepted
+              </span>
+            )}
           </div>
           <h4 className="font-semibold text-gray-900 text-sm leading-tight">
             {issue.title}

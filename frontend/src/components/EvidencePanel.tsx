@@ -5,9 +5,13 @@ import type { Issue } from './ThreePanelLayout';
 
 interface EvidencePanelProps {
   selectedIssue: Issue | null;
+  acceptedIssues: Set<string>;
+  onAcceptSuggestion: (issue: Issue) => void;
 }
 
-export function EvidencePanel({ selectedIssue }: EvidencePanelProps) {
+export function EvidencePanel({ selectedIssue, acceptedIssues, onAcceptSuggestion }: EvidencePanelProps) {
+  const issueId = selectedIssue ? `${selectedIssue.agent}-${selectedIssue.title}` : '';
+  const isAccepted = acceptedIssues.has(issueId);
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
@@ -93,9 +97,33 @@ export function EvidencePanel({ selectedIssue }: EvidencePanelProps) {
               )}
 
               {/* Action Button */}
-              <button className="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
-                Accept Suggestion
-              </button>
+              {selectedIssue.suggestion && (
+                <motion.button
+                  onClick={() => onAcceptSuggestion(selectedIssue)}
+                  disabled={isAccepted}
+                  whileHover={{ scale: isAccepted ? 1 : 1.02 }}
+                  whileTap={{ scale: isAccepted ? 1 : 0.98 }}
+                  className={`w-full font-medium py-3 px-4 rounded-lg transition-all flex items-center justify-center space-x-2 ${
+                    isAccepted
+                      ? 'bg-green-500 text-white cursor-not-allowed'
+                      : 'bg-primary-600 hover:bg-primary-700 text-white'
+                  }`}
+                >
+                  {isAccepted ? (
+                    <>
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      <span>Suggestion Accepted!</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✨</span>
+                      <span>Accept Suggestion</span>
+                    </>
+                  )}
+                </motion.button>
+              )}
             </motion.div>
           ) : (
             <motion.div
