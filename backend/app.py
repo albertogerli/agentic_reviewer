@@ -98,11 +98,11 @@ async def health_check():
 
 @app.post("/api/review/upload")
 async def upload_document(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     config: Optional[str] = Form(None),
     reference_files: Optional[List[UploadFile]] = File(None)
 ):
-    """Upload document with optional reference files"""
+    """Upload multiple documents with optional reference files"""
     try:
         # Parse config
         review_config = ReviewConfig()
@@ -110,14 +110,17 @@ async def upload_document(
             config_dict = json.loads(config)
             review_config = ReviewConfig(**config_dict)
         
-        # Save main file
+        # Save main files
         upload_dir = Path("uploads")
         upload_dir.mkdir(exist_ok=True)
         
-        file_path = upload_dir / file.filename
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        file_paths = []
+        for uploaded_file in files:
+            file_path = upload_dir / uploaded_file.filename
+            with open(file_path, "wb") as f:
+                content = await uploaded_file.read()
+                f.write(content)
+            file_paths.append(str(file_path))
         
         # Save reference files
         reference_paths = []
@@ -136,19 +139,170 @@ async def upload_document(
         
         # Start background processing
         asyncio.create_task(
-            process_review(review_id, str(file_path), review_config, reference_paths)
+            process_multiple_reviews(review_id, file_paths, review_config, reference_paths)
         )
         
         return {
             "status": "started",
-            "message": "Review started",
+            "message": f"Review started for {len(file_paths)} document(s)",
             "review_id": review_id,
+            "file_count": len(file_paths),
             "config": review_config.model_dump()
         }
         
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+async def process_multiple_reviews(
+    review_id: str,
+    file_paths: List[str],
+    config: ReviewConfig,
+    reference_paths: List[str]
+):
+    """Process multiple documents in batch"""
+    try:
+        logger.info(f"🚀 Starting batch review for {len(file_paths)} document(s)")
+        
+        # If single file, use normal processing
+        if len(file_paths) == 1:
+            await process_review(review_id, file_paths[0], config, reference_paths)
+            return
+        
+        # Multiple files: process each one
+        all_results = []
+        total_files = len(file_paths)
+        
+        for idx, file_path in enumerate(file_paths, 1):
+            await manager.broadcast({
+                "type": "progress",
+                "review_id": review_id,
+                "progress": int((idx - 1) / total_files * 90),
+                "status": f"Processing document {idx}/{total_files}: {Path(file_path).name}"
+            })
+            
+            # Process this document
+            sub_review_id = f"{review_id}_doc{idx}"
+            try:
+                # Create a modified progress callback for this specific file
+                single_result = await process_single_document(
+                    sub_review_id, 
+                    file_path, 
+                    config, 
+                    reference_paths,
+                    idx,
+                    total_files
+                )
+                all_results.append(single_result)
+            except Exception as e:
+                logger.error(f"❌ Error processing {file_path}: {e}")
+                all_results.append({
+                    "file": Path(file_path).name,
+                    "error": str(e),
+                    "status": "failed"
+                })
+        
+        # Combine results
+        await manager.broadcast({
+            "type": "progress",
+            "review_id": review_id,
+            "progress": 95,
+            "status": "Combining results..."
+        })
+        
+        # Save combined results
+        output_dir = Path("outputs") / f"batch_{review_id}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        combined_results = {
+            "batch_review_id": review_id,
+            "total_documents": total_files,
+            "successful": len([r for r in all_results if "error" not in r]),
+            "failed": len([r for r in all_results if "error" in r]),
+            "documents": all_results,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        with open(output_dir / "batch_results.json", 'w', encoding='utf-8') as f:
+            json.dump(combined_results, f, indent=2, ensure_ascii=False)
+        
+        await manager.broadcast({
+            "type": "complete",
+            "review_id": review_id,
+            "progress": 100,
+            "status": f"Batch review complete! {combined_results['successful']}/{total_files} successful",
+            "output_dir": str(output_dir)
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Batch review failed: {e}", exc_info=True)
+        await manager.broadcast({
+            "type": "error",
+            "review_id": review_id,
+            "error": str(e)
+        })
+
+async def process_single_document(
+    review_id: str,
+    file_path: str,
+    config: ReviewConfig,
+    reference_paths: List[str],
+    file_index: int,
+    total_files: int
+) -> dict:
+    """Process a single document and return results"""
+    # This is a simplified version that returns results instead of broadcasting
+    # Use similar logic to process_review but return the data
+    try:
+        from main import Config as AppConfig
+        from generic_reviewer import GenericReviewOrchestrator
+        
+        config_path = Path(__file__).parent.parent / "config.yaml"
+        app_config = AppConfig.from_yaml(str(config_path))
+        
+        # Extract text (same logic as process_review)
+        if file_path.endswith('.pdf'):
+            import PyPDF2
+            document_text = ""
+            with open(file_path, 'rb') as pdf_file:
+                pdf_reader = PyPDF2.PdfReader(pdf_file)
+                for page in pdf_reader.pages:
+                    document_text += page.extract_text() + "\n"
+        elif file_path.endswith(('.docx', '.doc')):
+            from docx import Document
+            doc = Document(file_path)
+            document_text = '\n'.join([para.text for para in doc.paragraphs])
+        else:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                document_text = f.read()
+        
+        title = Path(file_path).stem
+        
+        # Create orchestrator
+        orchestrator = GenericReviewOrchestrator(app_config)
+        
+        # Execute review
+        output_dir = Path("outputs") / f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        results = await orchestrator.execute_review_process(
+            document_text=document_text,
+            document_title=title,
+            output_dir=str(output_dir),
+            reference_docs=reference_paths,
+            output_language=config.output_language,
+            enable_interactive=False  # Disable interactive for batch
+        )
+        
+        return {
+            "file": Path(file_path).name,
+            "status": "success",
+            "output_dir": str(output_dir),
+            "summary": results.get("final_evaluation", "")[:200] + "..." if results.get("final_evaluation") else "N/A"
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to process {Path(file_path).name}: {e}")
 
 async def process_review(
     review_id: str,
@@ -547,8 +701,9 @@ async def apply_changes(review_id: str, changes: List[dict]):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/review/{review_id}/download/{file_type}")
+@app.head("/api/review/{review_id}/download/{file_type}")
 async def download_file(review_id: str, file_type: str):
-    """Download files"""
+    """Download files (supports HEAD to check existence)"""
     try:
         outputs_dir = Path("outputs")
         

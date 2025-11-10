@@ -34,7 +34,8 @@ export interface ReviewResults {
 interface ReviewState {
   // Current review
   reviewId: string | null;
-  file: File | null;
+  file: File | null; // Main file for backward compatibility
+  inputFiles: File[]; // Multiple input files
   referenceFiles: File[];
   config: ReviewConfig;
   
@@ -54,7 +55,8 @@ interface ReviewState {
   ws: WebSocket | null;
   
   // Actions
-  setFile: (file: File) => void;
+  setFile: (file: File | null) => void;
+  setInputFiles: (files: File[]) => void;
   setReferenceFiles: (files: File[]) => void;
   setConfig: (config: Partial<ReviewConfig>) => void;
   startReview: () => Promise<void>;
@@ -89,6 +91,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   // Initial state
   reviewId: null,
   file: null,
+  inputFiles: [],
   referenceFiles: [],
   config: DEFAULT_CONFIG,
   progress: DEFAULT_PROGRESS,
@@ -102,6 +105,8 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   // Actions
   setFile: (file) => set({ file, error: null }),
   
+  setInputFiles: (files) => set({ inputFiles: files, file: files[0] || null, error: null }),
+  
   setReferenceFiles: (files) => set({ referenceFiles: files }),
   
   setConfig: (config) => set((state) => ({
@@ -109,10 +114,13 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   })),
   
   startReview: async () => {
-    const { file, referenceFiles, config, connectWebSocket } = get();
+    const { file, inputFiles, referenceFiles, config, connectWebSocket } = get();
     
-    if (!file) {
-      set({ error: 'No file selected' });
+    // Use inputFiles if available, otherwise fall back to single file
+    const filesToProcess = inputFiles.length > 0 ? inputFiles : (file ? [file] : []);
+    
+    if (filesToProcess.length === 0) {
+      set({ error: 'No files selected' });
       return;
     }
     
@@ -122,9 +130,14 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
       // Connect WebSocket for real-time updates
       connectWebSocket();
       
-      // Upload file and start review
+      // Upload files and start review
       const formData = new FormData();
-      formData.append('file', file);
+      
+      // Add all input files
+      filesToProcess.forEach((f) => {
+        formData.append('files', f);
+      });
+      
       formData.append('config', JSON.stringify(config));
       
       // Add reference files if any
