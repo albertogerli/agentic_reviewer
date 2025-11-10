@@ -9,7 +9,7 @@ import { useReviewStore } from '../store/reviewStore';
 import { SparklesIcon, CpuChipIcon, GlobeAltIcon } from '@heroicons/react/24/outline';
 
 export default function Home() {
-  const { file, config, setConfig, startReview, isProcessing, progress, reset } = useReviewStore();
+  const { file, inputFiles, config, setConfig, startReview, isProcessing, progress, reset } = useReviewStore();
   
   // Reset state ONLY on first mount, not on every render
   useEffect(() => {
@@ -21,10 +21,15 @@ export default function Home() {
   }, []); // Empty deps = only on mount
   
   const handleStartReview = () => {
-    if (file) {
+    // Support both single file (backward compatibility) and multiple files
+    const hasFiles = inputFiles.length > 0 || file !== null;
+    if (hasFiles) {
       startReview();
     }
   };
+  
+  // Check if we have any files to process
+  const hasFilesToProcess = inputFiles.length > 0 || file !== null;
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
@@ -115,13 +120,15 @@ export default function Home() {
               <FileUpload />
               
               {/* Configuration Options */}
-              {file && (
+              {hasFilesToProcess && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   className="mt-8 pt-8 border-t border-gray-200"
                 >
-                  <h3 className="text-lg font-bold text-gray-900 mb-6">Review Options</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-6">
+                    📋 Review Options {inputFiles.length > 1 && `(${inputFiles.length} documents)`}
+                  </h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Language Select */}
@@ -251,7 +258,7 @@ export default function Home() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={handleStartReview}
-                    disabled={!file}
+                    disabled={!hasFilesToProcess}
                     className={`
                       mt-8 w-full py-4 rounded-xl font-bold text-lg
                       bg-gradient-primary text-white
@@ -262,7 +269,11 @@ export default function Home() {
                   >
                     <span className="flex items-center justify-center space-x-2">
                       <SparklesIcon className="w-6 h-6" />
-                      <span>Start AI Review</span>
+                      <span>
+                        {inputFiles.length > 1 
+                          ? `Start Batch Review (${inputFiles.length} documents)` 
+                          : 'Start AI Review'}
+                      </span>
                     </span>
                   </motion.button>
                 </motion.div>
