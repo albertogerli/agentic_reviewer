@@ -233,6 +233,33 @@ export function ReviewResults() {
           disabled={isGeneratingPresentation}
         />
       </div>
+
+      {/* Iterative Improvements (if available) */}
+      {results.iterations && results.iterations > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="mt-6"
+        >
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">
+            📝 Iterative Improvements ({results.iterations} iterations completed)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <DownloadCard
+              title="Revised Document"
+              description="AI-improved version after iterations"
+              icon={
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              }
+              color="indigo"
+              onClick={() => handleDownload('txt')}
+            />
+          </div>
+        </motion.div>
+      )}
       
       {/* Results Tabs */}
       <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -492,7 +519,7 @@ interface DownloadCardProps {
   title: string;
   description: string;
   icon: React.ReactNode;
-  color: 'blue' | 'purple' | 'green' | 'orange';
+  color: 'blue' | 'purple' | 'green' | 'orange' | 'indigo';
   onClick: () => void;
   disabled?: boolean;
 }
@@ -503,6 +530,7 @@ function DownloadCard({ title, description, icon, color, onClick, disabled = fal
     purple: 'from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700',
     green: 'from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700',
     orange: 'from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700',
+    indigo: 'from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700',
   };
   
   return (

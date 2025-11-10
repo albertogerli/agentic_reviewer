@@ -564,7 +564,8 @@ async def download_file(review_id: str, file_type: str):
         file_map = {
             "md": "review_report.md",
             "json": "review_results.json",
-            "html": "dashboard.html"
+            "html": "dashboard.html",
+            "txt": "revised_document.txt"
         }
         
         if file_type not in file_map:
