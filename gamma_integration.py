@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GammaConfig:
     """Configuration for Gamma API."""
     api_key: str
-    theme_id: Optional[str] = "Oasis"  # Default theme
+    theme_id: Optional[str] = None  # No default theme (let Gamma choose)
     num_cards: int = 12
     format: str = "presentation"
     export_as: str = "pdf"  # or "pptx"
@@ -272,7 +272,6 @@ Comprehensive assessment by {num_agents} specialized AI agents""")
             "inputText": input_text,
             "textMode": "preserve",  # Keep our structured text
             "format": config.format,
-            "themeId": config.theme_id,
             "numCards": config.num_cards,
             "cardSplit": "inputTextBreaks",  # Use our \n---\n breaks
             "exportAs": config.export_as,
@@ -299,6 +298,10 @@ Comprehensive assessment by {num_agents} specialized AI agents""")
                 }
             }
         }
+        
+        # Add optional fields
+        if config.theme_id:
+            payload["themeId"] = config.theme_id
         
         if additional_instructions:
             payload["additionalInstructions"] = additional_instructions
@@ -432,7 +435,7 @@ def create_presentation_from_review(
     
     config = GammaConfig(
         api_key=gamma_api_key,
-        theme_id=theme_id or "Oasis",
+        theme_id=theme_id,  # Use provided theme or None (let Gamma choose)
         num_cards=12,
         export_as=export_format
     )
