@@ -107,9 +107,28 @@ Comprehensive assessment by {num_agents} specialized AI agents""")
         risk_heatmap = review_results.get('risk_heatmap', {})
         if risk_heatmap:
             heatmap_content = "# Risk Assessment by Category\n"
-            sorted_risks = sorted(risk_heatmap.items(), key=lambda x: x[1], reverse=True)[:8]
+            # Filter and convert to numeric values, handle non-numeric gracefully
+            numeric_risks = []
+            for category, score in risk_heatmap.items():
+                try:
+                    # Convert to float if it's a dict or string
+                    if isinstance(score, dict):
+                        # If it's a dict, try to extract a numeric value
+                        numeric_score = float(score.get('score', 0)) if 'score' in score else 0
+                    elif isinstance(score, (int, float)):
+                        numeric_score = float(score)
+                    else:
+                        numeric_score = float(score)
+                    numeric_risks.append((category, numeric_score))
+                except (ValueError, TypeError, AttributeError):
+                    # Skip non-numeric values
+                    logger.warning(f"Skipping non-numeric risk value for {category}: {score}")
+                    continue
+            
+            # Sort by numeric score
+            sorted_risks = sorted(numeric_risks, key=lambda x: x[1], reverse=True)[:8]
             for category, score in sorted_risks:
-                bar = "█" * int(score / 10)
+                bar = "█" * max(1, int(score / 10))  # Ensure at least 1 bar
                 heatmap_content += f"* {category.replace('_', ' ').title()}: {bar} ({score:.0f})\n"
             content_parts.append(heatmap_content)
         
